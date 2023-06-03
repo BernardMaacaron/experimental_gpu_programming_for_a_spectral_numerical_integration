@@ -126,3 +126,19 @@ target_link_libraries(${PROJECT_NAME}_main
         Eigen3::Eigen
 )
 
+add_executable(${PROJECT_NAME}_matMul_benchmark
+        src/benchmark_2023/matMul_benchmark.cu
+        include/utilities.h
+        include/getCusolverErrorString.h
+)
+target_include_directories(${PROJECT_NAME}_matMul_benchmark
+    PUBLIC
+        ${CUDA_INCLUDE_DIRS}
+)
+target_link_libraries(${PROJECT_NAME}_matMul_benchmark
+    PUBLIC
+        cusolver
+        cublas
+        Eigen3::Eigen
+        benchmark
+)
