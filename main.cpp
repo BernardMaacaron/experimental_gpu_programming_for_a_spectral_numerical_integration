@@ -1,4 +1,14 @@
-﻿#include "chebyshev_differentiation.h"
+﻿#include <cstdio>
+#include <cstdlib>
+#include <vector>
+
+#include <fstream>
+#include <cmath>
+
+#include <Eigen/Dense>
+#include <unsupported/Eigen/KroneckerProduct>
+
+#include "chebyshev_differentiation.h"
 #include "utilities.h"
 
 
@@ -63,7 +73,6 @@ Eigen::MatrixXd computeCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixX
 
 }
 
-
 Eigen::VectorXd integrateQuaternions()
 {
     //  Obtain the Chebyshev differentiation matrix
@@ -83,15 +92,13 @@ Eigen::VectorXd integrateQuaternions()
 
     Eigen::MatrixXd C_NN =  computeCMatrix(qe, D_NN);
 
-    std::cout << "C_NN: " << C_NN << std::endl;
-
     Eigen::VectorXd q_init(4);
     q_init << 1, 0, 0, 0;
 
 
     Eigen::VectorXd ivp = D_IN*q_init;
 
-    auto b = Eigen::VectorXd::Zero(quaternion_problem_dimension);
+    Eigen::VectorXd b = Eigen::VectorXd::Zero(quaternion_problem_dimension);
 
     b -= ivp;
 
@@ -132,7 +139,6 @@ Eigen::MatrixXd updatePositionb(Eigen::MatrixXd t_Q_stack) {
     }
     return b;
 }
-
 
 Eigen::MatrixXd integratePosition()
 {
@@ -211,6 +217,43 @@ Eigen::MatrixXd updateCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixXd
 
 }
 
+Eigen::VectorXd computeNbar () 
+{
+    // Variables definition to include gravity (Nbar)
+    const double g = 9.81; // m/s^2
+    const double radius = 0.001; // m
+    const double A = M_PI*radius*radius;
+    const double rho = 7800; // kg/m^3
+
+    Eigen::VectorXd Fg(lambda_dimension/2);
+    Fg << 0, 0, -A*g*rho;
+    
+    Eigen::VectorXd t_Q_stack = integrateQuaternions();
+    Eigen::Matrix3d R;
+    Eigen::VectorXd Nbar(lambda_dimension/2);
+    Eigen::VectorXd Nbar_stack = Eigen::VectorXd::Zero((lambda_dimension/2)*(number_of_Chebyshev_points-1));
+
+    // to fix
+    for (unsigned int i = 0; i < number_of_Chebyshev_points-1; ++i) {
+
+        Eigen::Quaterniond Qbar(t_Q_stack(i),
+              t_Q_stack(i  +  (number_of_Chebyshev_points-1)),
+              t_Q_stack(i + 2*(number_of_Chebyshev_points-1)),
+              t_Q_stack(i + 3*(number_of_Chebyshev_points-1)));
+
+        
+        R = Qbar.toRotationMatrix();
+        Nbar = R.transpose()*Fg;
+
+        Nbar_stack(i) = Nbar.x();
+        Nbar_stack(i  +  (number_of_Chebyshev_points-1)) = Nbar.y();
+        Nbar_stack(i + 2*(number_of_Chebyshev_points-1)) = Nbar.z();
+
+    }
+
+    return Nbar_stack;
+
+}
 
 Eigen::MatrixXd integrateInternalForces()
 {
@@ -236,8 +279,7 @@ Eigen::MatrixXd integrateInternalForces()
 
     Eigen::VectorXd ivp = D_IN*N_init;
 
-    //  TODO: Update it to work with any possible N_bar
-    const auto beta = Eigen::VectorXd::Zero((lambda_dimension/2)*(number_of_Chebyshev_points-1));
+    Eigen::MatrixXd beta = -computeNbar();
 
     const auto res = beta - ivp;
 
@@ -245,7 +287,6 @@ Eigen::MatrixXd integrateInternalForces()
 
     return N_stack;
 }
-
 
 Eigen::MatrixXd updateCouplesb(Eigen::MatrixXd t_N_stack) {
 
@@ -281,7 +322,6 @@ Eigen::MatrixXd updateCouplesb(Eigen::MatrixXd t_N_stack) {
 
     return beta;
 }
-
 
 Eigen::MatrixXd integrateInternalCouples()
 {
@@ -320,7 +360,6 @@ Eigen::MatrixXd integrateInternalCouples()
 
     return C_stack;
 }
-
 
 Eigen::MatrixXd buildLambda(Eigen::MatrixXd t_C_stack, Eigen::MatrixXd t_N_stack)
 {
@@ -375,7 +414,6 @@ Eigen::MatrixXd updateQad_vector_b(Eigen::MatrixXd t_Lambda_stack)
     return B_NN;
 }
 
-
 Eigen::MatrixXd integrateGeneralisedForces(Eigen::MatrixXd t_Lambda_stack)
 {
 
@@ -384,7 +422,7 @@ Eigen::MatrixXd integrateGeneralisedForces(Eigen::MatrixXd t_Lambda_stack)
                0,
                0;
 
-    //  Extract the submatrix responsible for propagating the initial conditions
+//  Extract the submatrix responsible for propagating the initial conditions
 //    const Eigen::MatrixXd Dn_IN = Dn.block<number_of_Chebyshev_points-1, 1>(0, number_of_Chebyshev_points-1);
 
 //    Eigen::MatrixXd ivp(number_of_Chebyshev_points-1, position_dimension);

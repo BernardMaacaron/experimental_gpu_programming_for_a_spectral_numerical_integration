@@ -130,6 +130,7 @@ add_executable(${PROJECT_NAME}_matMul_benchmark
         src/benchmark_2023/matMul_benchmark.cu
         include/utilities.h
         include/getCusolverErrorString.h
+        include/benchmark_csv_exporter.h
 )
 target_include_directories(${PROJECT_NAME}_matMul_benchmark
     PUBLIC
@@ -139,6 +140,20 @@ target_link_libraries(${PROJECT_NAME}_matMul_benchmark
     PUBLIC
         cusolver
         cublas
+        Eigen3::Eigen
+        benchmark
+)
+
+
+
+add_executable(main_benchmark
+    src/benchmark_2023/main_benchmark.cpp
+    include/chebyshev_differentiation.h
+    include/spectral_integration_utilities.h
+    include/benchmark_csv_exporter.h
+)
+target_link_libraries(main_benchmark
+    PUBLIC
         Eigen3::Eigen
         benchmark
 )

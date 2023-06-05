@@ -9,6 +9,7 @@
 
 #include "utilities.h"  //  Utilities for error handling (must be after cublas or cusolver)
 #include "getCusolverErrorString.h"
+#include "benchmark_csv_exporter.h"
 
 
 #include <Eigen/Dense>
@@ -32,12 +33,19 @@ void benchmarkMatMul_CPU(::benchmark::State &t_state)
     while(t_state.KeepRunning()){
         A = A*B;
     }
+    //exportBenchmarkResultsToCSV(benchmark1_name + ".csv", t_state.name(), t_state.iterations(), t_state.real_time(), t_state.cpu_time());
+
 };
 
 void benchmarkMatMul_GPU(::benchmark::State &t_state)
 {
 
-    const unsigned int dim = t_state.range(0);
+    int microseconds = t_state.range(1);
+    int dim = t_state.range(0);
+    std::chrono::duration<double, std::micro> sleep_duration {
+        static_cast<double>(microseconds)
+    };
+
     t_state.counters = {
       {"dim: ", dim},
     };
@@ -88,18 +96,28 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
         cudaMalloc(reinterpret_cast<void **>(&d_b), size_of_b_in_bytes)
     );
 
+    for (auto _ : t_state) {
+        auto start = std::chrono::high_resolution_clock::now();
 
-    while(t_state.KeepRunning()){
+        //What we are actually running
+        while(t_state.KeepRunning()){
+            CUBLAS_CHECK(
+                cublasDgemm(cublasH, CUBLAS_OP_N, CUBLAS_OP_N, rows_A, cols_B, cols_A, &alpha_cublas, d_A, ld_A, d_B, ld_B, &beta_cublas, d_b, ld_A)
+            );
+            CUDA_CHECK(
+                cudaMemcpy(A.data(), d_b, size_of_b_in_bytes, cudaMemcpyDeviceToHost)
+            );
+        }
 
-        CUBLAS_CHECK(
-            cublasDgemm(cublasH, CUBLAS_OP_N, CUBLAS_OP_N, rows_A, cols_B, cols_A, &alpha_cublas, d_A, ld_A, d_B, ld_B, &beta_cublas, d_b, ld_A)
-        );
-        CUDA_CHECK(
-            cudaMemcpy(A.data(), d_b, size_of_b_in_bytes, cudaMemcpyDeviceToHost)
-        );
+        auto end = std::chrono::high_resolution_clock::now();
 
+        auto elapsed_seconds = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+
+        t_state.SetIterationTime(elapsed_seconds.count());
     }
 
+    //exportBenchmarkResultsToCSV(benchmark2_name + ".csv", t_state.name(), t_state.iterations(), t_state.real_time(), t_state.cpu_time());
+   
     CUDA_CHECK(
         cudaFree(d_A)
     );
@@ -136,8 +154,8 @@ int main(int argc, char *argv[])
 
     for(const auto dim : matrix_dim)
         ::benchmark::RegisterBenchmark(benchmark1_name.c_str(), benchmarkMatMul_CPU)->Arg(dim)->Repetitions(repetitions)->Unit(::benchmark::kMicrosecond);
-
-    ::benchmark::RegisterBenchmark("name", [](::benchmark::State &t_state){
+        
+    ::benchmark::RegisterBenchmark(benchmark1_name.c_str(), [](::benchmark::State &t_state){
         for(auto _ : t_state)
             int a = 0;
     });
@@ -145,7 +163,7 @@ int main(int argc, char *argv[])
     for(const auto dim : matrix_dim)
         ::benchmark::RegisterBenchmark(benchmark2_name.c_str(), benchmarkMatMul_GPU)->Arg(dim)->Repetitions(repetitions)->Unit(::benchmark::kMicrosecond);
 
-    ::benchmark::RegisterBenchmark("name", [](::benchmark::State &t_state){
+    ::benchmark::RegisterBenchmark(benchmark2_name.c_str(), [](::benchmark::State &t_state){
         for(auto _ : t_state)
             int a = 0;
     });
