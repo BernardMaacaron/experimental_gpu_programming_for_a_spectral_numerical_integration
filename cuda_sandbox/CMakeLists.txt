@@ -141,9 +141,8 @@ target_link_libraries(${PROJECT_NAME}_matMul_benchmark
         cusolver
         cublas
         Eigen3::Eigen
-        benchmark
+        benchmark::benchmark
 )
-
 
 
 add_executable(main_benchmark
