@@ -30,6 +30,21 @@ static constexpr unsigned int na = 3;
 
 Eigen::Matrix<double, ne*na, 1> qe;
 
+//  Obtain the Chebyshev differentiation matrix
+const Eigen::MatrixXd Dn = getDn<number_of_Chebyshev_points>();
+
+//FORWARD INTEGRATION:
+//  Extract D_NN from the differentiation matrix (for the spectral integration)
+const Eigen::MatrixXd Dn_NN_F = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(0, 0);
+//  Extract D_IN (for the propagation of initial conditions)
+const Eigen::MatrixXd Dn_IN_F = Dn.block<number_of_Chebyshev_points-1, 1>(0, number_of_Chebyshev_points-1);
+
+//BACKWARD INTEGRATION:
+//  Extract D_NN from the differentiation matrix (for the spectral integration)
+const Eigen::MatrixXd Dn_NN_B = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(1, 1);
+//  Extract D_IN (for the propagation of initial conditions)
+const Eigen::MatrixXd Dn_IN_B = Dn.block<number_of_Chebyshev_points-1, 1>(1, 0);
+
 
 // Used to build Q_stack
 Eigen::MatrixXd computeCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixXd &D_NN)
@@ -76,19 +91,9 @@ Eigen::MatrixXd computeCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixX
 
 Eigen::VectorXd integrateQuaternions()
 {
-    //  Obtain the Chebyshev differentiation matrix
-    const Eigen::MatrixXd Dn = getDn<number_of_Chebyshev_points>();
-
-    //  Extract D_NN from the differentiation matrix (for the spectral integration)
-    const Eigen::MatrixXd Dn_NN = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(0, 0);
-
-    //  Extract D_IN (for the propagation of initial conditions)
-    const Eigen::MatrixXd Dn_IN = Dn.block<number_of_Chebyshev_points-1, 1>(0, number_of_Chebyshev_points-1);
-
-
-    //  Now stack the matrices in the diagonal of bigger ones (as meny times as the state dimension)
-    const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct(Eigen::MatrixXd::Identity(quaternion_state_dimension, quaternion_state_dimension), Dn_NN);
-    const Eigen::MatrixXd D_IN = Eigen::KroneckerProduct(Eigen::MatrixXd::Identity(quaternion_state_dimension, quaternion_state_dimension), Dn_IN);
+   //  Now stack the matrices in the diagonal of bigger ones (as meny times as the state dimension)
+    const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(quaternion_state_dimension, quaternion_state_dimension), Dn_NN_F);
+    const Eigen::MatrixXd D_IN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(quaternion_state_dimension, quaternion_state_dimension), Dn_IN_F);
 
 
     Eigen::MatrixXd C_NN =  computeCMatrix(qe, D_NN);
@@ -118,7 +123,8 @@ Eigen::VectorXd integrateQuaternions()
 
 
 // Used to build r_stack
-Eigen::MatrixXd updatePositionb(Eigen::MatrixXd t_Q_stack) {
+Eigen::MatrixXd updatePositionb(Eigen::MatrixXd t_Q_stack)
+{
 
     Eigen::Matrix<double, number_of_Chebyshev_points-1, position_dimension> b;
 
@@ -151,21 +157,13 @@ Eigen::MatrixXd integratePosition()
               0;
 
 
-    //  Get the diffetentiation matrix
-    const Eigen::MatrixXd Dn = getDn<number_of_Chebyshev_points>();
-
-    //  Extract the submatrix responsible for the spectral integration
-    const Eigen::MatrixXd Dn_NN = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(0, 0);
-
     //  This matrix remains constant so we can pre invert
-    const auto Dn_NN_inv = Dn_NN.inverse();
+    Eigen::MatrixXd Dn_NN_inv = Dn_NN_F.inverse();
 
-    //  Extract the submatrix responsible for propagating the initial conditions
-    const Eigen::MatrixXd Dn_IN = Dn.block<number_of_Chebyshev_points-1, 1>(0, number_of_Chebyshev_points-1);
 
     Eigen::MatrixXd ivp(number_of_Chebyshev_points-1, position_dimension);
     for(unsigned int i=0; i<ivp.rows(); i++)
-        ivp.row(i) = Dn_IN(i, 0) * r_init.transpose();
+        ivp.row(i) = Dn_IN_F(i, 0) * r_init.transpose();
 
     Eigen::MatrixXd r_stack(number_of_Chebyshev_points-1, position_dimension);
 
@@ -259,19 +257,9 @@ Eigen::VectorXd computeNbar ()
 
 Eigen::MatrixXd integrateInternalForces()
 {
-    //  Obtain the Chebyshev differentiation matrix
-    const Eigen::MatrixXd Dn = getDn<number_of_Chebyshev_points>();
-
-    //  Extract D_NN from the differentiation matrix (for the spectral integration)
-    const Eigen::MatrixXd Dn_NN = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(1, 1);
-
-    //  Extract D_IN (for the propagation of initial conditions)
-    const Eigen::MatrixXd Dn_IN = Dn.block<number_of_Chebyshev_points-1, 1>(1, 0);
-
-
     //  Now stack the matrices in the diagonal of bigger ones (as meny times as the state dimension)
-    const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_NN);
-    const Eigen::MatrixXd D_IN = Eigen::KroneckerProduct(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_IN);
+    const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_NN_B);
+    const Eigen::MatrixXd D_IN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_IN_B);
 
     Eigen::MatrixXd C_NN =  updateCMatrix(qe, D_NN);
 
@@ -297,7 +285,8 @@ Eigen::MatrixXd integrateInternalForces()
     return N_stack;
 }
 
-Eigen::MatrixXd updateCouplesb(Eigen::MatrixXd t_N_stack) {
+Eigen::MatrixXd updateCouplesb(Eigen::MatrixXd t_N_stack)
+{
 
     Eigen::MatrixXd beta((lambda_dimension/2)*(number_of_Chebyshev_points-1), 1); // Dimension: 45x1
 
@@ -334,19 +323,9 @@ Eigen::MatrixXd updateCouplesb(Eigen::MatrixXd t_N_stack) {
 
 Eigen::MatrixXd integrateInternalCouples()
 {
-    //  Obtain the Chebyshev differentiation matrix
-    const Eigen::MatrixXd Dn = getDn<number_of_Chebyshev_points>();
-
-    //  Extract D_NN from the differentiation matrix (for the spectral integration)
-    const Eigen::MatrixXd Dn_NN = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(1, 1);
-
-    //  Extract D_IN (for the propagation of initial conditions)
-    const Eigen::MatrixXd Dn_IN = Dn.block<number_of_Chebyshev_points-1, 1>(1, 0);
-
-
     //  Now stack the matrices in the diagonal of bigger ones (as meny times as the state dimension)
-    const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_NN); // Dimension: 45x45
-    const Eigen::MatrixXd D_IN = Eigen::KroneckerProduct(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_IN); // Dimension: 45x3
+    const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_NN_B);
+    const Eigen::MatrixXd D_IN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_IN_B);
 
     Eigen::MatrixXd C_NN =  updateCMatrix(qe, D_NN);
 
@@ -449,16 +428,8 @@ Eigen::MatrixXd integrateGeneralisedForces(Eigen::MatrixXd t_Lambda_stack)
 
     Eigen::MatrixXd B_NN(number_of_Chebyshev_points-1, Qa_dimension);
 
-
-    //  Get the diffetentiation matrix
-    const Eigen::MatrixXd Dn = getDn<number_of_Chebyshev_points>();
-
-    //  Extract the submatrix responsible for the spectral integration
-    const Eigen::MatrixXd Dn_NN = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(1, 1);
-
-    //  This matrix remains constant so we can pre invert
-
-    const auto Dn_NN_inv = Dn_NN.inverse();
+    // Dn_NN is constant so we can pre-invert
+    Eigen::MatrixXd Dn_NN_inv = Dn_NN_B.inverse();
 
     Eigen::MatrixXd Qa_stack(Qa_dimension*(number_of_Chebyshev_points-1), 1);
 
