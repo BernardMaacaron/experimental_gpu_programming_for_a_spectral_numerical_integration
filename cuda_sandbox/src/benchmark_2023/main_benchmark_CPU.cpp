@@ -91,10 +91,31 @@ Eigen::MatrixXd computeCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixX
 
 Eigen::VectorXd integrateQuaternions()
 {
-   //  Now stack the matrices in the diagonal of bigger ones (as meny times as the state dimension)
+    ::benchmark::RegisterBenchmark("Quaternion Integration", [&](::benchmark::State &t_state){
+        // INITIALISATION 
+        const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(quaternion_state_dimension, quaternion_state_dimension), Dn_NN_F);
+        const Eigen::MatrixXd D_IN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(quaternion_state_dimension, quaternion_state_dimension), Dn_IN_F);
+
+        Eigen::MatrixXd C_NN =  computeCMatrix(qe, D_NN);
+
+        Eigen::VectorXd q_init(4);
+        q_init << 1, 0, 0, 0;
+
+        Eigen::VectorXd b = Eigen::VectorXd::Zero(quaternion_problem_dimension);
+
+        const auto C_NN_inv = C_NN.inverse();
+
+        // BENCHMARKING 
+        while(t_state.KeepRunning()){
+            Eigen::VectorXd ivp = D_IN*q_init;
+            b -= ivp;
+            Eigen::VectorXd Q_stack = C_NN_inv * b;
+        }
+    })->Repetitions(20)->Unit(::benchmark::kMicrosecond);
+
+    // STANDARD  
     const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(quaternion_state_dimension, quaternion_state_dimension), Dn_NN_F);
     const Eigen::MatrixXd D_IN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(quaternion_state_dimension, quaternion_state_dimension), Dn_IN_F);
-
 
     Eigen::MatrixXd C_NN =  computeCMatrix(qe, D_NN);
 
@@ -106,16 +127,8 @@ Eigen::VectorXd integrateQuaternions()
     Eigen::VectorXd ivp = D_IN*q_init;
     b -= ivp;
 
-    const auto C_NN_inv = C_NN.inverse();
-
-    ::benchmark::RegisterBenchmark("Quaternion Integration", [&](::benchmark::State &t_state){
-        while(t_state.KeepRunning()){
-            Eigen::VectorXd Q_stack = C_NN_inv * b;
-        }
-    })->Repetitions(20)->Unit(::benchmark::kMicrosecond);
-
-
     Eigen::VectorXd Q_stack = C_NN.inverse() * b;
+
     return Q_stack;
 
 }
@@ -147,19 +160,43 @@ Eigen::MatrixXd updatePositionb(Eigen::MatrixXd t_Q_stack)
 
 Eigen::MatrixXd integratePosition()
 {
+    ::benchmark::RegisterBenchmark("Position Integration", [&](::benchmark::State &t_state){
+        // INITIALISATION
+        const auto Q_stack = integrateQuaternions();
+        Eigen::MatrixXd b_NN(number_of_Chebyshev_points-1, position_dimension);
+
+        Eigen::Vector3d r_init;
+        r_init << 0,
+                0,
+                0;
+
+        Eigen::MatrixXd Dn_NN_inv = Dn_NN_F.inverse();
+
+        Eigen::MatrixXd ivp(number_of_Chebyshev_points-1, position_dimension);
+        for(unsigned int i=0; i<ivp.rows(); i++)
+            ivp.row(i) = Dn_IN_F(i, 0) * r_init.transpose();
+
+        Eigen::MatrixXd r_stack(number_of_Chebyshev_points-1, position_dimension);
+
+        b_NN = updatePositionb(Q_stack);
+
+        // BENCHMARKING
+        while(t_state.KeepRunning()){
+            r_stack = Dn_NN_inv*(b_NN - ivp);
+        }
+    })->Repetitions(20)->Unit(::benchmark::kMicrosecond);
+
+
+    // STANDARD 
     const auto Q_stack = integrateQuaternions();
     Eigen::MatrixXd b_NN(number_of_Chebyshev_points-1, position_dimension);
 
-
     Eigen::Vector3d r_init;
     r_init << 0,
-              0,
-              0;
+            0,
+            0;
 
-
-    //  This matrix remains constant so we can pre invert
     Eigen::MatrixXd Dn_NN_inv = Dn_NN_F.inverse();
-
 
     Eigen::MatrixXd ivp(number_of_Chebyshev_points-1, position_dimension);
     for(unsigned int i=0; i<ivp.rows(); i++)
@@ -168,15 +205,9 @@ Eigen::MatrixXd integratePosition()
     Eigen::MatrixXd r_stack(number_of_Chebyshev_points-1, position_dimension);
 
     b_NN = updatePositionb(Q_stack);
-
-    ::benchmark::RegisterBenchmark("Position Integration", [&](::benchmark::State &t_state){
-        while(t_state.KeepRunning()){
-            r_stack = Dn_NN_inv*(b_NN - ivp);
-        }
-    })->Repetitions(20)->Unit(::benchmark::kMicrosecond);
-    
    
     r_stack = Dn_NN_inv*(b_NN - ivp);
+
     return r_stack;
 }
 
@@ -257,7 +288,30 @@ Eigen::VectorXd computeNbar ()
 
 Eigen::MatrixXd integrateInternalForces()
 {
-    //  Now stack the matrices in the diagonal of bigger ones (as meny times as the state dimension)
+    ::benchmark::RegisterBenchmark("Internal Forces Integration", [&](::benchmark::State &t_state){
+        //  INITIALISATION
+        const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_NN_B);
+        const Eigen::MatrixXd D_IN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_IN_B);
+
+        Eigen::MatrixXd C_NN =  updateCMatrix(qe, D_NN);
+
+
+        Eigen::VectorXd N_init(lambda_dimension/2);
+        N_init << 1, 0, 0;
+
+        Eigen::MatrixXd beta = -computeNbar();
+
+        const auto C_NN_inv = C_NN.inverse();
+
+        //  BENCHMARKING
+        while(t_state.KeepRunning()){
+            Eigen::VectorXd ivp = D_IN*N_init;
+            const auto res = beta - ivp;
+            Eigen::VectorXd N_stack = C_NN_inv * res;
+        }
+    })->Repetitions(20)->Unit(::benchmark::kMicrosecond);
+
+    //  STANDARD
     const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_NN_B);
     const Eigen::MatrixXd D_IN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_IN_B);
 
@@ -273,15 +327,8 @@ Eigen::MatrixXd integrateInternalForces()
 
     const auto res = beta - ivp;
 
-    const auto C_NN_inv = C_NN.inverse();
-
-    ::benchmark::RegisterBenchmark("Internal Forces Integration", [&](::benchmark::State &t_state){
-        while(t_state.KeepRunning()){
-            Eigen::VectorXd N_stack = C_NN_inv * res;
-        }
-    })->Repetitions(20)->Unit(::benchmark::kMicrosecond);
-
     Eigen::VectorXd N_stack = C_NN.inverse() * res;
+
     return N_stack;
 }
 
@@ -323,19 +370,43 @@ Eigen::MatrixXd updateCouplesb(Eigen::MatrixXd t_N_stack)
 
 Eigen::MatrixXd integrateInternalCouples()
 {
-    //  Now stack the matrices in the diagonal of bigger ones (as meny times as the state dimension)
+    ::benchmark::RegisterBenchmark("Internal Couples Integration", [&](::benchmark::State &t_state){
+        //  INITIALISATION 
+        const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_NN_B);
+        const Eigen::MatrixXd D_IN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_IN_B);
+
+        Eigen::MatrixXd C_NN =  updateCMatrix(qe, D_NN);
+
+        const auto N_stack = integrateInternalForces();
+
+        Eigen::MatrixXd beta_NN((lambda_dimension/2)*(number_of_Chebyshev_points-1), 1);
+
+        beta_NN = updateCouplesb(N_stack);
+
+        Eigen::VectorXd C_init(lambda_dimension/2);
+        C_init << 1, 0, 0;
+
+        const auto C_NN_inv = C_NN.inverse();
+
+        //  BENCHMARKING
+        while(t_state.KeepRunning()){
+            Eigen::VectorXd ivp = D_IN*C_init;
+            const auto res = beta_NN - ivp;
+            Eigen::VectorXd C_stack = C_NN_inv * res;
+        }
+    })->Repetitions(20)->Unit(::benchmark::kMicrosecond);
+
+    //  STANDARD
     const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_NN_B);
     const Eigen::MatrixXd D_IN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_IN_B);
 
     Eigen::MatrixXd C_NN =  updateCMatrix(qe, D_NN);
 
-
-    //  Building the b_NN vector
     const auto N_stack = integrateInternalForces();
+
     Eigen::MatrixXd beta_NN((lambda_dimension/2)*(number_of_Chebyshev_points-1), 1);
 
     beta_NN = updateCouplesb(N_stack);
-
 
     Eigen::VectorXd C_init(lambda_dimension/2);
     C_init << 1, 0, 0;
@@ -344,17 +415,8 @@ Eigen::MatrixXd integrateInternalCouples()
 
     const auto res = beta_NN - ivp;
 
-    const auto C_NN_inv = C_NN.inverse();
-
-    ::benchmark::RegisterBenchmark("Internal Couples Integration", [&](::benchmark::State &t_state){
-        while(t_state.KeepRunning()){
-
-            Eigen::VectorXd C_stack = C_NN_inv * res;
-        }
-    })->Repetitions(20)->Unit(::benchmark::kMicrosecond);
-
-
     Eigen::VectorXd C_stack = C_NN.inverse() * res;
+
     return C_stack;
 }
 
@@ -413,7 +475,27 @@ Eigen::MatrixXd updateQad_vector_b(Eigen::MatrixXd t_Lambda_stack)
 
 Eigen::MatrixXd integrateGeneralisedForces(Eigen::MatrixXd t_Lambda_stack)
 {
+    ::benchmark::RegisterBenchmark("Generalized Forces Integration", [&](::benchmark::State &t_state){
+    //  INITIALISATION    
+    Eigen::Vector3d Qa_init;
+    Qa_init << 0,
+               0,
+               0;
 
+    Eigen::MatrixXd B_NN(number_of_Chebyshev_points-1, Qa_dimension);
+
+    Eigen::MatrixXd Dn_NN_inv = Dn_NN_B.inverse();
+
+    Eigen::MatrixXd Qa_stack(Qa_dimension*(number_of_Chebyshev_points-1), 1);
+    
+    //  BENCHMARKING
+    B_NN = updateQad_vector_b(t_Lambda_stack);
+        while(t_state.KeepRunning()){
+            Qa_stack = Dn_NN_inv*(B_NN);
+        }
+    })->Repetitions(20)->Unit(::benchmark::kMicrosecond);
+    
+    //  STANDARD
     Eigen::Vector3d Qa_init;
     Qa_init << 0,
                0,
@@ -433,17 +515,10 @@ Eigen::MatrixXd integrateGeneralisedForces(Eigen::MatrixXd t_Lambda_stack)
 
     Eigen::MatrixXd Qa_stack(Qa_dimension*(number_of_Chebyshev_points-1), 1);
 
-
     B_NN = updateQad_vector_b(t_Lambda_stack);
 
-    ::benchmark::RegisterBenchmark("Generalized Forces Integration", [&](::benchmark::State &t_state){
-        while(t_state.KeepRunning()){
-            Qa_stack = Dn_NN_inv*(B_NN);
-        }
-    })->Repetitions(20)->Unit(::benchmark::kMicrosecond);
-
-
     Qa_stack = Dn_NN_inv*(B_NN);
+
     return Qa_stack;
 }
 
@@ -484,9 +559,9 @@ int main(int argc, char *argv[])
     const auto Qa_stack = integrateGeneralisedForces(Lambda_stack);
     //std::cout << "Qa_stack : \n" << Qa_stack << std::endl;
 
-    ::benchmark::Initialize(&argc, argv);
+    benchmark::Initialize(&argc, argv);
 
-    ::benchmark::RunSpecifiedBenchmarks();
+    benchmark::RunBenchmarks();
 
     return 0;
 }
