@@ -52,8 +52,12 @@ SET(CUDA_VERBOSE_BUILD ON)
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} -O0 -g")
 set(CMAKE_CUDA_FLAGS_DEBUG "${CMAKE_CUDA_FLAGS} -O0 -g -lineinfo")
 
-find_package(Eigen3 3.4 REQUIRED NO_MODULE)
+# Google benchmark flag/options
+set(BENCHMARK_FORMAT csv)
+set(BENCHMARK_OUT "${CMAKE_CURRENT_SOURCE_DIR}/src/benchmark_2023/results.csv")
+set(BENCHMARK_OUT_FORMAT csv)
 
+find_package(Eigen3 3.4 REQUIRED NO_MODULE)
 find_package(benchmark REQUIRED)
 
 # ##########################################
@@ -62,6 +66,7 @@ find_package(benchmark REQUIRED)
 include_directories(include)
 
 
+#MATRIX COPY Executable
 add_executable(${PROJECT_NAME}_matrix_copy
 		src/copy/cublas_copy_example.cu)
 target_include_directories(${PROJECT_NAME}_matrix_copy
@@ -73,7 +78,7 @@ target_link_libraries(${PROJECT_NAME}_matrix_copy
         cublas
 )
 
-
+#MATRIX MULTIPLICATION Executable
 add_executable(${PROJECT_NAME}_matrix_multiplication
 		src/matrix_multiplication/example_matrix_multiplication.cu)
 target_include_directories(${PROJECT_NAME}_matrix_copy
@@ -87,8 +92,7 @@ target_link_libraries(${PROJECT_NAME}_matrix_multiplication
 )
 
 
-
-
+#MATRIX INVERSE Executable
 add_executable(${PROJECT_NAME}_matrix_inverse 
 		src/getrf/cusolver_getrf_example.cu
 )
@@ -104,6 +108,7 @@ target_link_libraries(${PROJECT_NAME}_matrix_inverse
 )
 
 
+#MAIN Executable
 add_executable(${PROJECT_NAME}_main 
         src/main/main.cu
         include/chebyshev_differentiation.h
@@ -112,8 +117,6 @@ add_executable(${PROJECT_NAME}_main
         include/lie_algebra_utilities.h
         include/globals.h
         include/getCusolverErrorString.h
-
-
 )
 target_include_directories(${PROJECT_NAME}_main
     PUBLIC
@@ -126,6 +129,8 @@ target_link_libraries(${PROJECT_NAME}_main
         Eigen3::Eigen
 )
 
+
+#MATMUL BENCHMARK Executable
 add_executable(${PROJECT_NAME}_matMul_benchmark
         src/benchmark_2023/matMul_benchmark.cu
         include/utilities.h
@@ -144,15 +149,44 @@ target_link_libraries(${PROJECT_NAME}_matMul_benchmark
         benchmark::benchmark
 )
 
+# # Add custom command to export benchmark results as CSV
+# add_custom_command(TARGET ${PROJECT_NAME}_matMul_benchmark POST_BUILD
+#     COMMAND ${PROJECT_NAME}_matMul_benchmark --benchmark_out_format=csv --benchmark_out="result.csv"
+#     COMMENT "Exporting benchmark results to result.csv"
+# )
 
-add_executable(main_benchmark
-    src/benchmark_2023/main_benchmark.cpp
+#MAIN BENCHMARK CPU Executable
+add_executable(${PROJECT_NAME}_main_benchmark_CPU
+    src/benchmark_2023/main_benchmark_CPU.cpp
     include/chebyshev_differentiation.h
     include/spectral_integration_utilities.h
     include/benchmark_csv_exporter.h
 )
-target_link_libraries(main_benchmark
+target_link_libraries(${PROJECT_NAME}_main_benchmark_CPU
     PUBLIC
         Eigen3::Eigen
-        benchmark
+        benchmark::benchmark
+)
+
+
+#MAIN BENCHMARK GPU Executable
+add_executable(${PROJECT_NAME}_main_benchmark_GPU
+        src/benchmark_2023/main_benchmark_GPU.cu
+        include/chebyshev_differentiation.h
+        include/utilities.h
+        include/spectral_integration_utilities.h
+        include/lie_algebra_utilities.h
+        include/globals.h
+        include/getCusolverErrorString.h
+)
+target_include_directories(${PROJECT_NAME}_main_benchmark_GPU 
+    PUBLIC
+        ${CUDA_INCLUDE_DIRS}
+)
+target_link_libraries(${PROJECT_NAME}_main_benchmark_GPU
+    PUBLIC
+        cusolver
+        cublas
+        Eigen3::Eigen
+        benchmark::benchmark
 )

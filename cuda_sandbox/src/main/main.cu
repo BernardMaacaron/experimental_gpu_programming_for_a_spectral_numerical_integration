@@ -674,7 +674,6 @@ Eigen::MatrixXd integrateInternalCouples()
     double* d_D_IN = nullptr;
     double* d_C_init = nullptr;
     double* d_beta_NN = nullptr;
-    double* d_N_stack = nullptr;
     double* d_work = nullptr;
     int* d_info = nullptr;
 

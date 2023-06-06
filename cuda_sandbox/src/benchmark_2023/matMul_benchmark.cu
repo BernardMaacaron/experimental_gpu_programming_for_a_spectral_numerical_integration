@@ -89,6 +89,17 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
         cudaMalloc(reinterpret_cast<void **>(&d_b), size_of_b_in_bytes)
     );
 
+    // //Template
+    // for (auto _ : t_state) {
+    //     auto start = std::chrono::high_resolution_clock::now();
+    //     //insert benchmark code here
+    //     auto end = std::chrono::high_resolution_clock::now();
+
+    //     auto elapsed_seconds = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+
+    //     t_state.SetIterationTime(elapsed_seconds.count());
+    // }
+
     for (auto _ : t_state) {
         auto start = std::chrono::high_resolution_clock::now();
         CUBLAS_CHECK(
@@ -131,7 +142,7 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
 int main(int argc, char *argv[])
 {
 
-    const unsigned int repetitions = 5;
+    const unsigned int repetitions = 1;
 
     std::vector<unsigned int> matrix_dim = {5, 10, 15, 20};
 
