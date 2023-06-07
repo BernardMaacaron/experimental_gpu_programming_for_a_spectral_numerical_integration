@@ -148,12 +148,13 @@ target_link_libraries(${PROJECT_NAME}_matMul_benchmark
         Eigen3::Eigen
         benchmark::benchmark
 )
+# Add custom command to export benchmark results as CSV
+add_custom_command(TARGET ${PROJECT_NAME}_matMul_benchmark POST_BUILD
+    COMMAND ${PROJECT_NAME}_matMul_benchmark --benchmark_out_format=csv --benchmark_out="matMul_benchmark_result.csv"
+    # ${PROJECT_NAME}_matMul_benchmark --benchmark_format=csv
+    COMMENT "Exporting benchmark results to result.csv"
+)
 
-# # Add custom command to export benchmark results as CSV
-# add_custom_command(TARGET ${PROJECT_NAME}_matMul_benchmark POST_BUILD
-#     COMMAND ${PROJECT_NAME}_matMul_benchmark --benchmark_out_format=csv --benchmark_out="result.csv"
-#     COMMENT "Exporting benchmark results to result.csv"
-# )
 
 #MAIN BENCHMARK CPU Executable
 add_executable(${PROJECT_NAME}_main_benchmark_CPU
@@ -166,6 +167,12 @@ target_link_libraries(${PROJECT_NAME}_main_benchmark_CPU
     PUBLIC
         Eigen3::Eigen
         benchmark::benchmark
+)
+# Add custom command to export benchmark results as CSV
+add_custom_command(TARGET ${PROJECT_NAME}_main_benchmark_CPU POST_BUILD
+    COMMAND ${PROJECT_NAME}_main_benchmark_CPU --benchmark_out_format=csv --benchmark_out="main_benchmark_CPU_result.csv"
+    # ${PROJECT_NAME}_matMul_benchmark --benchmark_format=csv
+    COMMENT "Exporting benchmark results to result.csv"
 )
 
 
@@ -189,4 +196,10 @@ target_link_libraries(${PROJECT_NAME}_main_benchmark_GPU
         cublas
         Eigen3::Eigen
         benchmark::benchmark
+)
+# Add custom command to export benchmark results as CSV
+add_custom_command(TARGET ${PROJECT_NAME}_main_benchmark_GPU POST_BUILD
+    COMMAND ${PROJECT_NAME}_main_benchmark_GPU --benchmark_out_format=csv --benchmark_out="main_benchmark_GPU_result.csv"
+    # ${PROJECT_NAME}_matMul_benchmark --benchmark_format=csv
+    COMMENT "Exporting benchmark results to result.csv"
 )

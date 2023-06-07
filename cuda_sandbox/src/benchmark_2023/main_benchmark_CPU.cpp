@@ -561,7 +561,7 @@ int main(int argc, char *argv[])
 
     benchmark::Initialize(&argc, argv);
 
-    benchmark::RunBenchmarks();
+    benchmark::RunSpecifiedBenchmarks();
 
     return 0;
 }

@@ -1610,8 +1610,6 @@ Eigen::MatrixXd integrateGeneralisedForces(Eigen::MatrixXd t_Lambda_stack)
 
 
 
-
-
 int main(int argc, char *argv[])
 {
 /* step 1: create cublas handle, bind a stream 
