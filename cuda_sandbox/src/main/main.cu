@@ -260,7 +260,7 @@ Eigen::VectorXd integrateQuaternions()
 
 
 // Used to build r_stack
-Eigen::MatrixXd updatePositionb(Eigen::MatrixXd t_Q_stack) {
+Eigen::MatrixXd updatePositionb(Eigen::MatrixXd t_Q_stack_CUDA) { 
 
     Eigen::Matrix<double, number_of_Chebyshev_points-1, position_dimension> b;
 
@@ -268,10 +268,10 @@ Eigen::MatrixXd updatePositionb(Eigen::MatrixXd t_Q_stack) {
 
     for (unsigned int i = 0; i < number_of_Chebyshev_points-1; ++i) {
 
-        q = { t_Q_stack(i),
-              t_Q_stack(i  +  (number_of_Chebyshev_points-1)),
-              t_Q_stack(i + 2*(number_of_Chebyshev_points-1)),
-              t_Q_stack(i + 3*(number_of_Chebyshev_points-1)) };
+        q = { t_Q_stack_CUDA(i),
+              t_Q_stack_CUDA(i  +  (number_of_Chebyshev_points-1)),
+              t_Q_stack_CUDA(i + 2*(number_of_Chebyshev_points-1)),
+              t_Q_stack_CUDA(i + 3*(number_of_Chebyshev_points-1)) };
 
         b.block<1,3>(i, 0) = (q.toRotationMatrix()*Eigen::Vector3d(1, 0, 0)).transpose();
 
@@ -279,7 +279,7 @@ Eigen::MatrixXd updatePositionb(Eigen::MatrixXd t_Q_stack) {
     return b;
 }
 
-Eigen::MatrixXd integratePosition()
+Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
 {   
     Eigen::Vector3d r_init;
     r_init << 0,
@@ -292,10 +292,8 @@ Eigen::MatrixXd integratePosition()
     Eigen::MatrixXd ivp(number_of_Chebyshev_points-1, position_dimension);
     for(unsigned int i=0; i<ivp.rows(); i++)
         ivp.row(i) = Dn_IN_F(i, 0) * r_init.transpose();
-
-    const auto Q_stack_CUDA = integrateQuaternions();
     
-    Eigen::MatrixXd b_NN = updatePositionb(Q_stack_CUDA);
+    Eigen::MatrixXd b_NN = updatePositionb(t_Q_stack_CUDA);
 
     Eigen::MatrixXd res = b_NN - ivp;
 
@@ -404,7 +402,7 @@ Eigen::MatrixXd updateCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixXd
 
 }
 
-Eigen::VectorXd computeNbar () 
+Eigen::VectorXd computeNbar (Eigen::MatrixXd t_Q_stack_CUDA) 
 {
     // Variables definition to include gravity (Nbar)
     const double g = 9.81; // m/s^2
@@ -415,18 +413,17 @@ Eigen::VectorXd computeNbar ()
     Eigen::VectorXd Fg(lambda_dimension/2);
     Fg << 0, 0, -A*g*rho;
     
-    Eigen::VectorXd t_Q_stack = integrateQuaternions();
-    Eigen::Matrix3d R;
-    Eigen::VectorXd Nbar(lambda_dimension/2);
+    Eigen::Matrix3d R = Eigen::Matrix3d::Zero();
+    Eigen::VectorXd Nbar = Eigen::VectorXd::Zero(lambda_dimension/2);
     Eigen::VectorXd Nbar_stack = Eigen::VectorXd::Zero((lambda_dimension/2)*(number_of_Chebyshev_points-1));
 
     // to fix
     for (unsigned int i = 0; i < number_of_Chebyshev_points-1; ++i) {
 
-        Eigen::Quaterniond Qbar(t_Q_stack(i),
-              t_Q_stack(i  +  (number_of_Chebyshev_points-1)),
-              t_Q_stack(i + 2*(number_of_Chebyshev_points-1)),
-              t_Q_stack(i + 3*(number_of_Chebyshev_points-1)));
+        Eigen::Quaterniond Qbar(t_Q_stack_CUDA(i),
+              t_Q_stack_CUDA(i  +  (number_of_Chebyshev_points-1)),
+              t_Q_stack_CUDA(i + 2*(number_of_Chebyshev_points-1)),
+              t_Q_stack_CUDA(i + 3*(number_of_Chebyshev_points-1)));
 
         
         R = Qbar.toRotationMatrix();
@@ -442,7 +439,7 @@ Eigen::VectorXd computeNbar ()
 
 }
 
-Eigen::MatrixXd integrateInternalForces()
+Eigen::MatrixXd integrateInternalForces(Eigen::MatrixXd t_Q_stack_CUDA)
 {   
     //  Now stack the matrices in the diagonal of bigger ones (as meny times as the state dimension)
     const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_NN_B);
@@ -451,9 +448,9 @@ Eigen::MatrixXd integrateInternalForces()
     Eigen::MatrixXd C_NN =  updateCMatrix(qe, D_NN);
 
     Eigen::VectorXd N_init(lambda_dimension/2);
-    N_init << 0, 0, 0;
+    N_init << 1, 0, 0;
 
-    Eigen::MatrixXd beta = -computeNbar();
+    Eigen::MatrixXd beta = -computeNbar(t_Q_stack_CUDA);
 
     //Definition of matrices dimensions.
     const int rows_C_NN = C_NN.rows();
@@ -592,7 +589,7 @@ Eigen::MatrixXd integrateInternalForces()
     return N_stack_CUDA;
 }
 
-Eigen::MatrixXd updateCouplesb(Eigen::MatrixXd t_N_stack) {
+Eigen::MatrixXd updateCouplesb(Eigen::MatrixXd t_N_stack_CUDA) {
 
     Eigen::MatrixXd beta((lambda_dimension/2)*(number_of_Chebyshev_points-1), 1); // Dimension: 45x1
 
@@ -610,9 +607,9 @@ Eigen::MatrixXd updateCouplesb(Eigen::MatrixXd t_N_stack) {
 
     for (unsigned int i = 0; i < number_of_Chebyshev_points-1; ++i) {
 
-        N << t_N_stack(i),
-             t_N_stack(i  +  (number_of_Chebyshev_points-1)),
-             t_N_stack(i + 2*(number_of_Chebyshev_points-1));
+        N << t_N_stack_CUDA(i),
+             t_N_stack_CUDA(i  +  (number_of_Chebyshev_points-1)),
+             t_N_stack_CUDA(i + 2*(number_of_Chebyshev_points-1));
 
 
         b = skew(Gamma).transpose()*N-C_bar;
@@ -627,27 +624,23 @@ Eigen::MatrixXd updateCouplesb(Eigen::MatrixXd t_N_stack) {
     return beta;
 }
 
-Eigen::MatrixXd integrateInternalCouples()
+Eigen::MatrixXd integrateInternalCouples(Eigen::MatrixXd t_N_stack_CUDA)
 {
     //  Now stack the matrices in the diagonal of bigger ones (as meny times as the state dimension)
     const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_NN_B); // Dimension: 45x45
     const Eigen::MatrixXd D_IN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_IN_B); // Dimension: 45x3
 
     Eigen::MatrixXd C_NN =  updateCMatrix(qe, D_NN);
-
-
-    //  Building the b_NN vector
-    const auto N_stack_CUDA = integrateInternalForces();
     
     //beta_NN((lambda_dimension/2)*(number_of_Chebyshev_points-1), 1);
-    Eigen::MatrixXd beta_NN = updateCouplesb(N_stack_CUDA);
+    Eigen::MatrixXd beta_NN = updateCouplesb(t_N_stack_CUDA);
 
 
     Eigen::VectorXd C_init(lambda_dimension/2);
-    C_init << 0, 0, 0;
+    C_init << 1, 0, 0;
 
     //What we want to calculate
-    Eigen::MatrixXd C_stack_CUDA(N_stack_CUDA.rows(), N_stack_CUDA.cols());
+    Eigen::MatrixXd C_stack_CUDA(t_N_stack_CUDA.rows(), t_N_stack_CUDA.cols());
 
     //Definition of matrices dimensions.
     const int rows_C_NN = C_NN.rows();
@@ -682,7 +675,7 @@ Eigen::MatrixXd integrateInternalCouples()
     const auto size_of_D_IN_in_bytes = size_of_double * D_IN.size();
     const auto size_of_C_init_in_bytes = size_of_double * C_init.size();
     const auto size_of_beta_NN_in_bytes = size_of_double * beta_NN.size();
-    const auto size_of_N_stack_in_bytes = size_of_double * N_stack_CUDA.size();
+    const auto size_of_N_stack_in_bytes = size_of_double * t_N_stack_CUDA.size();
 
     // Allocate the memory
     CUDA_CHECK(
@@ -775,7 +768,7 @@ Eigen::MatrixXd integrateInternalCouples()
     return C_stack_CUDA;
 }
 
-Eigen::MatrixXd buildLambda(Eigen::MatrixXd t_C_stack, Eigen::MatrixXd t_N_stack)
+Eigen::MatrixXd buildLambda(Eigen::MatrixXd t_C_stack_CUDA, Eigen::MatrixXd t_N_stack_CUDA)
 {
     Eigen::Vector3d C;
     Eigen::Vector3d N;
@@ -786,13 +779,13 @@ Eigen::MatrixXd buildLambda(Eigen::MatrixXd t_C_stack, Eigen::MatrixXd t_N_stack
 
     for (unsigned int i = 0; i < number_of_Chebyshev_points-1; ++i) {
 
-        N << t_N_stack(i),
-             t_N_stack(i  +  (number_of_Chebyshev_points-1)),
-             t_N_stack(i + 2*(number_of_Chebyshev_points-1));
+        N << t_N_stack_CUDA(i),
+             t_N_stack_CUDA(i  +  (number_of_Chebyshev_points-1)),
+             t_N_stack_CUDA(i + 2*(number_of_Chebyshev_points-1));
 
-        C << t_C_stack(i),
-             t_C_stack(i  +  (number_of_Chebyshev_points-1)),
-             t_C_stack(i + 2*(number_of_Chebyshev_points-1));
+        C << t_C_stack_CUDA(i),
+             t_C_stack_CUDA(i  +  (number_of_Chebyshev_points-1)),
+             t_C_stack_CUDA(i + 2*(number_of_Chebyshev_points-1));
 
         lambda << C, N;
 
@@ -965,26 +958,26 @@ int main(int argc, char *argv[])
             0,
             0,
             0;
-    qe.setZero();
+    //qe.setZero();
     
 
-    const auto Q_stack = integrateQuaternions();
-    std::cout << "Q_stack : \n" << Q_stack << std::endl;
+    const auto Q_stack_CUDA = integrateQuaternions();
+    std::cout << "Quaternion Integration : \n" << Q_stack_CUDA << std::endl;
     
-    const auto r_stack = integratePosition();
-    std::cout << "r_stack : \n" << r_stack << std::endl;
+    const auto r_stack_CUDA = integratePosition(Q_stack_CUDA);
+    std::cout << "Position Integration : \n" << r_stack_CUDA << std::endl;
 
-    const auto N_stack = integrateInternalForces();
-    std::cout << "N_stack : \n" << N_stack << "\n" << std::endl;
+    const auto N_stack_CUDA = integrateInternalForces(Q_stack_CUDA);
+    std::cout << "Internal Forces Integration : \n" << N_stack_CUDA << "\n" << std::endl;
 
-    const auto C_stack = integrateInternalCouples();
-    std::cout << "C_stack : \n" << C_stack << "\n" << std::endl;
+    const auto C_stack_CUDA = integrateInternalCouples(N_stack_CUDA);
+    std::cout << "Internal Couples Integration : \n" << C_stack_CUDA << "\n" << std::endl;
 
-    const auto Lambda_stack = buildLambda(C_stack, N_stack);
-    std::cout << "Lambda_stack : \n" << Lambda_stack << "\n" << std::endl;
+    const auto Lambda_stack_CUDA = buildLambda(C_stack_CUDA, N_stack_CUDA);
+    //std::cout << "Lambda_stack : \n" << Lambda_stack_CUDA << "\n" << std::endl;
 
-    const auto Qa_stack = integrateGeneralisedForces(Lambda_stack);
-    std::cout << "Qa_stack : \n" << Qa_stack << std::endl;
+    const auto Qa_stack_CUDA = integrateGeneralisedForces(Lambda_stack_CUDA);
+    std::cout << "Generalized Forces Integration : \n" << Qa_stack_CUDA << std::endl;
 
     /*
     Destry cuda objects

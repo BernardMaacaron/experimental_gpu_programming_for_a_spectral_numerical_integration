@@ -89,6 +89,14 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
         cudaMalloc(reinterpret_cast<void **>(&d_b), size_of_b_in_bytes)
     );
 
+        //  Copy the data: cudaMemcpy(destination, file_to_copy, size_of_the_file, std_cmd)
+    CUDA_CHECK(
+        cudaMemcpy(d_A, A.data(), size_of_A_in_bytes, cudaMemcpyHostToDevice)
+    );
+    CUDA_CHECK(
+        cudaMemcpy(d_B, B.data(), size_of_B_in_bytes, cudaMemcpyHostToDevice)
+    );
+
     // //Template
     // for (auto _ : t_state) {
     //     auto start = std::chrono::high_resolution_clock::now();
@@ -142,9 +150,9 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
 int main(int argc, char *argv[])
 {
 
-    const unsigned int repetitions = 1;
+    const unsigned int repetitions = 20;
 
-    std::vector<unsigned int> matrix_dim = {5, 10, 15, 20};
+    std::vector<unsigned int> matrix_dim = {20, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500};
 
     const std::string benchmark1_name = "Matrix Multiplication CPU";
     const std::string benchmark2_name = "Matrix Multiplication GPU";
