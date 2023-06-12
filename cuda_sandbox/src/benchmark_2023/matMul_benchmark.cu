@@ -113,9 +113,6 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
         CUBLAS_CHECK(
             cublasDgemm(cublasH, CUBLAS_OP_N, CUBLAS_OP_N, rows_A, cols_B, cols_A, &alpha_cublas, d_A, ld_A, d_B, ld_B, &beta_cublas, d_b, ld_A)
         );
-        CUDA_CHECK(
-            cudaMemcpy(A.data(), d_b, size_of_b_in_bytes, cudaMemcpyDeviceToHost)
-        );
         auto end = std::chrono::high_resolution_clock::now();
 
         auto elapsed_seconds = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);

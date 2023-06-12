@@ -28,7 +28,7 @@ void benchmarkMatMul_CPU(::benchmark::State &t_state)
 
 
     while(t_state.KeepRunning()){
-        A_inv = A.inverse();
+        Eigen::MatrixXd A_inv = A.inverse();
     }
     //exportBenchmarkResultsToCSV(benchmark1_name + ".csv", .name(), .iterations(), t_state.real_time(), t_state.cpu_time());
 };
@@ -92,15 +92,10 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
     for (auto _ : t_state) {
         auto start = std::chrono::high_resolution_clock::now();
 
-        cublasStatus_t status = cublasDgetrfBatched(cublasH, dim, d_A, ld_A, devInfo, d_A_inv, ld_A_inv, 1);
+        cublasStatus_t status = cublasDgetrf(cublasH, dim, d_A, ld_A, NULL, d_A_inv, ld_A_inv, 1);
         if (status != CUBLAS_STATUS_SUCCESS) {
-        printf("Matrix inversion failed.\n");
-        return -1;
+            printf("Matrix inversion failed.\n");
         }
-        
-        CUDA_CHECK(
-            cudaMemcpy(A_inv.data(), d_A_inv, size_of_A_inv_in_bytes, cudaMemcpyDeviceToHost)
-        );
         auto end = std::chrono::high_resolution_clock::now();
         auto elapsed_seconds = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
 

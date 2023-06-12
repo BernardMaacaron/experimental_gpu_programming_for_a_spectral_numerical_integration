@@ -181,6 +181,32 @@ add_custom_command(TARGET ${PROJECT_NAME}_matLU_benchmark POST_BUILD
 )
 
 
+#MATINVBENCHMARK Executable
+add_executable(${PROJECT_NAME}_matInv_benchmark
+        src/benchmark_2023/matInv_benchmark.cu
+        include/utilities.h
+        include/getCusolverErrorString.h
+        include/benchmark_csv_exporter.h
+)
+target_include_directories(${PROJECT_NAME}_matInv_benchmark
+    PUBLIC
+        ${CUDA_INCLUDE_DIRS}
+)
+target_link_libraries(${PROJECT_NAME}_matInv_benchmark
+    PUBLIC
+        cusolver
+        cublas
+        Eigen3::Eigen
+        benchmark::benchmark
+)
+# Add custom command to export benchmark results as CSV
+add_custom_command(TARGET ${PROJECT_NAME}_matInv_benchmark POST_BUILD
+    COMMAND ${PROJECT_NAME}_matInv_benchmark --benchmark_out_format=csv --benchmark_out="matInv_benchmark_result.csv"
+    # ${PROJECT_NAME}_matMul_benchmark --benchmark_format=csv
+    COMMENT "Exporting benchmark results to result.csv"
+)
+
+
 #MAIN BENCHMARK CPU Executable
 add_executable(${PROJECT_NAME}_main_benchmark_CPU
     src/benchmark_2023/main_benchmark_CPU.cpp

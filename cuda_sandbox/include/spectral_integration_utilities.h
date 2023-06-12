@@ -66,4 +66,21 @@ static const Eigen::MatrixXd Phi(const double t_X, const double &t_begin=0, cons
     return Phi;
 }
 
+static const Eigen::MatrixXd toMatrix(const Eigen::MatrixXd t_matrix, const unsigned int number_of_Chebyshev_points)
+{
+    Eigen::MatrixXd output_mat(3, number_of_Chebyshev_points);
+    Eigen::Vector3d block;
+
+    for (unsigned int i = 0; i < number_of_Chebyshev_points-1; ++i) {
+
+        block = { t_matrix(i),
+              t_matrix(i  +  (number_of_Chebyshev_points-1)),
+              t_matrix(i + 2*(number_of_Chebyshev_points-1))};
+    
+        output_mat.col(i) = block;
+    }
+
+    return output_mat;
+}
+
 #endif // SPECTRAL_INTEGRATION_UTILITIES_H

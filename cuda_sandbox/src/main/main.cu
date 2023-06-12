@@ -973,11 +973,14 @@ int main(int argc, char *argv[])
     const auto C_stack_CUDA = integrateInternalCouples(N_stack_CUDA);
     std::cout << "Internal Couples Integration : \n" << C_stack_CUDA << "\n" << std::endl;
 
-    const auto Lambda_stack_CUDA = buildLambda(C_stack_CUDA, N_stack_CUDA);
-    //std::cout << "Lambda_stack : \n" << Lambda_stack_CUDA << "\n" << std::endl;
+    std::cout << "Internal Forces MATRIX : \n" << toMatrix(N_stack_CUDA, number_of_Chebyshev_points) << "\n" << std::endl;
+    std::cout << "Internal Couples MATRIX : \n" << toMatrix(C_stack_CUDA, number_of_Chebyshev_points) << "\n" << std::endl;
+    
+    // const auto Lambda_stack_CUDA = buildLambda(C_stack_CUDA, N_stack_CUDA);
+    // //std::cout << "Lambda_stack : \n" << Lambda_stack_CUDA << "\n" << std::endl;
 
-    const auto Qa_stack_CUDA = integrateGeneralisedForces(Lambda_stack_CUDA);
-    std::cout << "Generalized Forces Integration : \n" << Qa_stack_CUDA << std::endl;
+    // const auto Qa_stack_CUDA = integrateGeneralisedForces(Lambda_stack_CUDA);
+    // std::cout << "Generalized Forces Integration : \n" << Qa_stack_CUDA << std::endl;
 
     /*
     Destry cuda objects
