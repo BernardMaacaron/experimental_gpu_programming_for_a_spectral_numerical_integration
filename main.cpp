@@ -29,6 +29,25 @@ static constexpr unsigned int na = 3;
 
 Eigen::Matrix<double, ne*na, 1> qe;
 
+static const Eigen::MatrixXd toMatrix(const Eigen::VectorXd t_matrix, const unsigned int state_dim)
+{
+    int cols = t_matrix.size()/state_dim;
+    Eigen::MatrixXd output_mat(state_dim, cols);
+    Eigen::Vector3d block;
+
+    for (unsigned int i = 0; i < cols-1; ++i) {
+
+        block = { t_matrix(i),
+              t_matrix(i  +  (cols-1)),
+              t_matrix(i + 2*(cols-1))};
+    
+        output_mat.col(i) = block;
+    }
+
+    return output_mat;
+}
+
+
 
 // Used to build Q_stack
 Eigen::MatrixXd computeCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixXd &D_NN)
@@ -191,10 +210,11 @@ Eigen::MatrixXd updateCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixXd
     //  Define the Chebyshev points on the unit circle
     const auto Chebyshev_points = ComputeChebyshevPoints<number_of_Chebyshev_points>();
 
-    Eigen::Vector3d K;
-    Eigen::MatrixXd A_at_chebyshev_point(lambda_dimension/2, lambda_dimension/2);
+    Eigen::Vector3d K = Eigen::Vector3d::Zero();
+    Eigen::MatrixXd A_at_chebyshev_point= Eigen::MatrixXd::Zero(lambda_dimension/2, lambda_dimension/2);
+    Eigen::MatrixXd A_NN = Eigen::MatrixXd::Zero(C_NN.rows(), C_NN.cols());
 
-    for(unsigned int i=0; i<Chebyshev_points.size()-1; i++){
+    for(unsigned int i=1; i<number_of_Chebyshev_points; i++){
 
         //  Extract the curvature from the strain
         K = Phi<na, ne>(Chebyshev_points[i])*t_qe;
@@ -203,18 +223,29 @@ Eigen::MatrixXd updateCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixXd
         Eigen::Matrix3d K_hat = skew(K);
         A_at_chebyshev_point = K_hat.transpose();
 
+        //  Build the A_NN matrix
         for (unsigned int row = 0; row < lambda_dimension/2; ++row) {
             for (unsigned int col = 0; col < lambda_dimension/2; ++col) {
-                int row_index = row*(number_of_Chebyshev_points-1)+i;
-                int col_index = col*(number_of_Chebyshev_points-1)+i;
-                C_NN(row_index, col_index) = D_NN(row_index, col_index) - A_at_chebyshev_point(row, col);
+                int row_index = row*(number_of_Chebyshev_points-1);
+                int col_index = col*(number_of_Chebyshev_points-1);
+                A_NN(row_index, col_index) = A_at_chebyshev_point(row, col);
             }
         }
 
+ 
+        // for (unsigned int row = 0; row < lambda_dimension/2; ++row) {
+        //     for (unsigned int col = 0; col < lambda_dimension/2; ++col) {
+        //         int row_index = row*(number_of_Chebyshev_points-1)+i;
+        //         int col_index = col*(number_of_Chebyshev_points-1)+i;
+        //         C_NN(row_index, col_index) = D_NN(row_index, col_index) - A_at_chebyshev_point(row, col);
+        //         std::cout<<row_index<<","<<col_index<<" = "<<row_index<<","<<col_index<<" - "<<row<<","<<col<<std::endl;
+        //     }
+        // }
     }
+    
+    C_NN = D_NN - A_NN;
 
     return C_NN;
-
 }
 
 Eigen::VectorXd computeNbar () 
@@ -275,13 +306,13 @@ Eigen::MatrixXd integrateInternalForces()
 
 
     Eigen::VectorXd N_init(lambda_dimension/2);
-    N_init << 1, 0, 0;
+    N_init << 0, 0, 0;
 
     Eigen::VectorXd ivp = D_IN*N_init;
 
-    Eigen::MatrixXd beta = -computeNbar();
+    Eigen::VectorXd beta = -computeNbar();
 
-    const auto res = beta - ivp;
+    const Eigen::VectorXd res = beta - ivp;
 
     Eigen::VectorXd N_stack = C_NN.inverse() * res;
 
@@ -389,10 +420,8 @@ Eigen::MatrixXd buildLambda(Eigen::MatrixXd t_C_stack, Eigen::MatrixXd t_N_stack
 }
 
 
-
 // Used to build Qa_stack
-Eigen::MatrixXd updateQad_vector_b(Eigen::MatrixXd t_Lambda_stack)
-{
+Eigen::MatrixXd updateQad_vector_b(Eigen::MatrixXd t_Lambda_stack){
     //  Define the Chebyshev points on the unit circle
     const auto Chebyshev_points = ComputeChebyshevPoints<number_of_Chebyshev_points>();
 
@@ -471,24 +500,28 @@ int main(int argc, char *argv[])
             0,
             0;
 
-    const auto Q_stack = integrateQuaternions();
-    std::cout << "Q_stack : \n" << Q_stack << std::endl;
+    //qe.setZero();
+
+    // const auto Q_stack = integrateQuaternions();
+    // std::cout << "Q_stack : \n" << Q_stack << std::endl;
 
 
-    const auto r_stack = integratePosition();
-    std::cout << "r_stack : \n" << r_stack << std::endl;
+    // const auto r_stack = integratePosition();
+    // std::cout << "r_stack : \n" << r_stack << std::endl;
 
     const auto N_stack = integrateInternalForces();
+    std::cout << "N_stack : \n" << toMatrix(N_stack, 3) << "\n" << std::endl;
     std::cout << "N_stack : \n" << N_stack << "\n" << std::endl;
 
-    const auto C_stack = integrateInternalCouples();
-    std::cout << "C_stack : \n" << C_stack << "\n" << std::endl;
 
-    const auto Lambda_stack = buildLambda(C_stack, N_stack);
-    std::cout << "Lambda_stack : \n" << Lambda_stack << "\n" << std::endl;
+    // const auto C_stack = integrateInternalCouples();
+    // std::cout << "C_stack : \n" << toMatrix(C_stack) << "\n" << std::endl;
 
-    const auto Qa_stack = integrateGeneralisedForces(Lambda_stack);
-    std::cout << "Qa_stack : \n" << Qa_stack << std::endl;
+    // const auto Lambda_stack = buildLambda(C_stack, N_stack);
+    // std::cout << "Lambda_stack : \n" << Lambda_stack << "\n" << std::endl;
+
+    // const auto Qa_stack = integrateGeneralisedForces(Lambda_stack);
+    // std::cout << "Qa_stack : \n" << Qa_stack << std::endl;
 
 
 
