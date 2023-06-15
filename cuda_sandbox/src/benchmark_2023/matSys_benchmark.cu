@@ -134,9 +134,6 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
         cudaFree(d_A)
     );
     CUDA_CHECK(
-        cudaFree(d_B)
-    );
-    CUDA_CHECK(
         cudaFree(d_b)
     );
     CUBLAS_CHECK(
