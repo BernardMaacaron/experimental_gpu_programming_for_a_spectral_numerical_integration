@@ -17,6 +17,7 @@
 
 #include <Eigen/Dense>
 #include <unsupported/Eigen/KroneckerProduct>
+#include <benchmark/benchmark.h>
 
 
 static const unsigned int number_of_Chebyshev_points = 16;
@@ -30,21 +31,6 @@ static const unsigned int lambda_dimension = 6;
 static const unsigned int Qa_dimension = 9;
 
 Eigen::Matrix<double, ne*na, 1> qe;
-
-//  Obtain the Chebyshev differentiation matrix
-const Eigen::MatrixXd Dn = getDn<number_of_Chebyshev_points>();
-
-//FORWARD INTEGRATION:
-//  Extract D_NN from the differentiation matrix (for the spectral integration)
-const Eigen::MatrixXd Dn_NN_F = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(0, 0);
-//  Extract D_IN (for the propagation of initial conditions)
-const Eigen::MatrixXd Dn_IN_F = Dn.block<number_of_Chebyshev_points-1, 1>(0, number_of_Chebyshev_points-1);
-
-//BACKWARD INTEGRATION:
-//  Extract D_NN from the differentiation matrix (for the spectral integration)
-const Eigen::MatrixXd Dn_NN_B = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(1, 1);
-//  Extract D_IN (for the propagation of initial conditions)
-const Eigen::MatrixXd Dn_IN_B = Dn.block<number_of_Chebyshev_points-1, 1>(1, 0);
 
 
 // CUDA specific variables
@@ -96,6 +82,22 @@ Eigen::VectorXd integrateQuaternions()
     // ==================================== BENCHMARK ==================================== 
 
     ::benchmark::RegisterBenchmark("Integrate Quaternions:", [&](::benchmark::State &t_state){
+
+    t_state.counters = {
+        {"na", na},
+        {"ne", ne},
+        {"Cheb pts", number_of_Chebyshev_points}
+    };
+
+    const Eigen::MatrixXd Dn = getDn<number_of_Chebyshev_points>();
+
+    //FORWARD INTEGRATION:
+    //  Extract D_NN from the differentiation matrix (for the spectral integration)
+    const Eigen::MatrixXd Dn_NN_F = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(0, 0);
+    //  Extract D_IN (for the propagation of initial conditions)
+    const Eigen::MatrixXd Dn_IN_F = Dn.block<number_of_Chebyshev_points-1, 1>(0, number_of_Chebyshev_points-1);
+
+
     // INITIALISATION
     const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(quaternion_state_dimension, quaternion_state_dimension), Dn_NN_F);
     const Eigen::MatrixXd D_IN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(quaternion_state_dimension, quaternion_state_dimension), Dn_IN_F);
@@ -263,6 +265,14 @@ Eigen::VectorXd integrateQuaternions()
     })->Repetitions(20)->Unit(::benchmark::kMicrosecond);
 
     // ==================================== STANDARD ====================================
+    //  Obtain the Chebyshev differentiation matrix
+    const Eigen::MatrixXd Dn = getDn<number_of_Chebyshev_points>();
+
+    //FORWARD INTEGRATION:
+    //  Extract D_NN from the differentiation matrix (for the spectral integration)
+    const Eigen::MatrixXd Dn_NN_F = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(0, 0);
+    //  Extract D_IN (for the propagation of initial conditions)
+    const Eigen::MatrixXd Dn_IN_F = Dn.block<number_of_Chebyshev_points-1, 1>(0, number_of_Chebyshev_points-1);
 
     //  Now stack the matrices in the diagonal of bigger ones (as meny times as the state dimension)
     const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(quaternion_state_dimension, quaternion_state_dimension), Dn_NN_F);
@@ -454,6 +464,22 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
     // ==================================== BENCHMARK ==================================== 
 
     ::benchmark::RegisterBenchmark("Integrate Position:", [&](::benchmark::State &t_state){
+    
+    t_state.counters = {
+        {"na", na},
+        {"ne", ne},
+        {"Cheb pts", number_of_Chebyshev_points}
+    };
+
+    const Eigen::MatrixXd Dn = getDn<number_of_Chebyshev_points>();
+
+    //FORWARD INTEGRATION:
+    //  Extract D_NN from the differentiation matrix (for the spectral integration)
+    const Eigen::MatrixXd Dn_NN_F = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(0, 0);
+    //  Extract D_IN (for the propagation of initial conditions)
+    const Eigen::MatrixXd Dn_IN_F = Dn.block<number_of_Chebyshev_points-1, 1>(0, number_of_Chebyshev_points-1);
+
+
     // INITIALISATION
     Eigen::Vector3d r_init;
     r_init << 0,
@@ -550,6 +576,16 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
     })->Repetitions(20)->Unit(::benchmark::kMicrosecond);
 
     // ==================================== STANDARD ====================================
+
+    //  Obtain the Chebyshev differentiation matrix
+    const Eigen::MatrixXd Dn = getDn<number_of_Chebyshev_points>();
+
+    //FORWARD INTEGRATION:
+    //  Extract D_NN from the differentiation matrix (for the spectral integration)
+    const Eigen::MatrixXd Dn_NN_F = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(0, 0);
+    //  Extract D_IN (for the propagation of initial conditions)
+    const Eigen::MatrixXd Dn_IN_F = Dn.block<number_of_Chebyshev_points-1, 1>(0, number_of_Chebyshev_points-1);
+
 
     Eigen::Vector3d r_init;
     r_init << 0,
@@ -715,6 +751,22 @@ Eigen::MatrixXd integrateInternalForces(Eigen::MatrixXd t_Q_stack_CUDA)
 {   
     // ==================================== BENCHMARK ==================================== 
     ::benchmark::RegisterBenchmark("Integrate Internal Forces:", [&](::benchmark::State &t_state){
+    
+    t_state.counters = {
+        {"na", na},
+        {"ne", ne},
+        {"Cheb pts", number_of_Chebyshev_points}
+    };
+
+    //  Obtain the Chebyshev differentiation matrix
+    const Eigen::MatrixXd Dn = getDn<number_of_Chebyshev_points>();
+    //BACKWARD INTEGRATION:
+    //  Extract D_NN from the differentiation matrix (for the spectral integration)
+    const Eigen::MatrixXd Dn_NN_B = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(1, 1);
+    //  Extract D_IN (for the propagation of initial conditions)
+    const Eigen::MatrixXd Dn_IN_B = Dn.block<number_of_Chebyshev_points-1, 1>(1, 0);
+
+
     // INITIALISATION
     const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_NN_B);
     const Eigen::MatrixXd D_IN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_IN_B);
@@ -724,7 +776,7 @@ Eigen::MatrixXd integrateInternalForces(Eigen::MatrixXd t_Q_stack_CUDA)
     Eigen::VectorXd N_init(lambda_dimension/2);
     N_init << 1, 0, 0;
 
-    Eigen::MatrixXd beta = Eigen::MatrixXd::Zero(number_of_Chebyshev_points-1)*(lambda_dimension/2), 1);
+    Eigen::MatrixXd beta = Eigen::MatrixXd::Zero((number_of_Chebyshev_points-1)*(lambda_dimension/2), 1);
 
     //Definition of matrices dimensions.
     const int rows_C_NN = C_NN.rows();
@@ -873,6 +925,14 @@ Eigen::MatrixXd integrateInternalForces(Eigen::MatrixXd t_Q_stack_CUDA)
     })->Repetitions(20)->Unit(::benchmark::kMicrosecond);
     
     // ==================================== STANDARD ====================================
+
+        //  Obtain the Chebyshev differentiation matrix
+    const Eigen::MatrixXd Dn = getDn<number_of_Chebyshev_points>();
+    //BACKWARD INTEGRATION:
+    //  Extract D_NN from the differentiation matrix (for the spectral integration)
+    const Eigen::MatrixXd Dn_NN_B = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(1, 1);
+    //  Extract D_IN (for the propagation of initial conditions)
+    const Eigen::MatrixXd Dn_IN_B = Dn.block<number_of_Chebyshev_points-1, 1>(1, 0);
 
     //  Now stack the matrices in the diagonal of bigger ones (as meny times as the state dimension)
     const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_NN_B);
@@ -1061,6 +1121,21 @@ Eigen::MatrixXd integrateInternalCouples(Eigen::MatrixXd t_N_stack_CUDA)
 {
     // ==================================== BENCHMARK ==================================== 
     ::benchmark::RegisterBenchmark("Integrate Internal Couples:", [&](::benchmark::State &t_state){
+
+    t_state.counters = {
+        {"na", na},
+        {"ne", ne},
+        {"Cheb pts", number_of_Chebyshev_points}
+    };
+
+    //  Obtain the Chebyshev differentiation matrix
+    const Eigen::MatrixXd Dn = getDn<number_of_Chebyshev_points>();
+    //BACKWARD INTEGRATION:
+    //  Extract D_NN from the differentiation matrix (for the spectral integration)
+    const Eigen::MatrixXd Dn_NN_B = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(1, 1);
+    //  Extract D_IN (for the propagation of initial conditions)
+    const Eigen::MatrixXd Dn_IN_B = Dn.block<number_of_Chebyshev_points-1, 1>(1, 0);
+
     // INITIALISATION
     const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_NN_B); // Dimension: 45x45
     const Eigen::MatrixXd D_IN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_IN_B); // Dimension: 45x3
@@ -1210,6 +1285,14 @@ Eigen::MatrixXd integrateInternalCouples(Eigen::MatrixXd t_N_stack_CUDA)
     })->Repetitions(20)->Unit(::benchmark::kMicrosecond);
 
     // ==================================== STANDARD ====================================
+    //  Obtain the Chebyshev differentiation matrix
+    const Eigen::MatrixXd Dn = getDn<number_of_Chebyshev_points>();
+    //BACKWARD INTEGRATION:
+    //  Extract D_NN from the differentiation matrix (for the spectral integration)
+    const Eigen::MatrixXd Dn_NN_B = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(1, 1);
+    //  Extract D_IN (for the propagation of initial conditions)
+    const Eigen::MatrixXd Dn_IN_B = Dn.block<number_of_Chebyshev_points-1, 1>(1, 0);
+
 
     //  Now stack the matrices in the diagonal of bigger ones (as meny times as the state dimension)
     const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(lambda_dimension/2, lambda_dimension/2), Dn_NN_B); // Dimension: 45x45
@@ -1407,7 +1490,23 @@ Eigen::MatrixXd updateQad_vector_b(Eigen::MatrixXd t_Lambda_stack)
 Eigen::MatrixXd integrateGeneralisedForces(Eigen::MatrixXd t_Lambda_stack)
 {   
     // ==================================== BENCHMARK ==================================== 
-    ::benchmark::RegisterBenchmark("Integrate Position:", [&](::benchmark::State &t_state){
+    ::benchmark::RegisterBenchmark("Integrate Generalized Forces:", [&](::benchmark::State &t_state){
+    
+    t_state.counters = {
+        {"na", na},
+        {"ne", ne},
+        {"Cheb pts", number_of_Chebyshev_points}
+    };
+
+    //  Obtain the Chebyshev differentiation matrix
+    const Eigen::MatrixXd Dn = getDn<number_of_Chebyshev_points>();
+    //BACKWARD INTEGRATION:
+    //  Extract D_NN from the differentiation matrix (for the spectral integration)
+    const Eigen::MatrixXd Dn_NN_B = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(1, 1);
+    //  Extract D_IN (for the propagation of initial conditions)
+    const Eigen::MatrixXd Dn_IN_B = Dn.block<number_of_Chebyshev_points-1, 1>(1, 0);
+
+
     // INITIALISATION
     Eigen::Vector3d Qa_init;
     Qa_init << 0,
@@ -1499,6 +1598,14 @@ Eigen::MatrixXd integrateGeneralisedForces(Eigen::MatrixXd t_Lambda_stack)
     // ==================================== STANDARD ====================================
 
     // Qa_stack = B_NN*Dn_NN_inv
+    //  Obtain the Chebyshev differentiation matrix
+    const Eigen::MatrixXd Dn = getDn<number_of_Chebyshev_points>();
+    //BACKWARD INTEGRATION:
+    //  Extract D_NN from the differentiation matrix (for the spectral integration)
+    const Eigen::MatrixXd Dn_NN_B = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(1, 1);
+    //  Extract D_IN (for the propagation of initial conditions)
+    const Eigen::MatrixXd Dn_IN_B = Dn.block<number_of_Chebyshev_points-1, 1>(1, 0);
+
     Eigen::Vector3d Qa_init;
     Qa_init << 0,
                0,
@@ -1610,25 +1717,25 @@ int main(int argc, char *argv[])
     
 
     const auto Q_stack_CUDA = integrateQuaternions();
-    std::cout << "Quaternion Integration : \n" << Q_stack_CUDA << std::endl;
+    // std::cout << "Quaternion Integration : \n" << Q_stack_CUDA << std::endl;
     
     const auto r_stack_CUDA = integratePosition(Q_stack_CUDA);
-    std::cout << "Position Integration : \n" << r_stack_CUDA << std::endl;
+    // std::cout << "Position Integration : \n" << r_stack_CUDA << std::endl;
 
     const auto N_stack_CUDA = integrateInternalForces(Q_stack_CUDA);
-    std::cout << "Internal Forces Integration : \n" << N_stack_CUDA << "\n" << std::endl;
+    // std::cout << "Internal Forces Integration : \n" << N_stack_CUDA << "\n" << std::endl;
 
     const auto C_stack_CUDA = integrateInternalCouples(N_stack_CUDA);
-    std::cout << "Internal Couples Integration : \n" << C_stack_CUDA << "\n" << std::endl;
+    // std::cout << "Internal Couples Integration : \n" << C_stack_CUDA << "\n" << std::endl;
 
     const auto Lambda_stack_CUDA = buildLambda(C_stack_CUDA, N_stack_CUDA);
     //std::cout << "Lambda_stack : \n" << Lambda_stack_CUDA << "\n" << std::endl;
 
     const auto Qa_stack_CUDA = integrateGeneralisedForces(Lambda_stack_CUDA);
-    std::cout << "Generalized Forces Integration : \n" << Qa_stack_CUDA << std::endl;
+    // std::cout << "Generalized Forces Integration : \n" << Qa_stack_CUDA << std::endl;
 
     // Benchmark initialization6
-    ::benchmark::Initialize(&argc, argv);_yy9
+    ::benchmark::Initialize(&argc, argv);
     ::benchmark::RunSpecifiedBenchmarks();
     
     // Destry cuda objects

@@ -223,27 +223,27 @@ Eigen::MatrixXd updateCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixXd
         Eigen::Matrix3d K_hat = skew(K);
         A_at_chebyshev_point = K_hat.transpose();
 
-        //  Build the A_NN matrix
-        for (unsigned int row = 0; row < lambda_dimension/2; ++row) {
-            for (unsigned int col = 0; col < lambda_dimension/2; ++col) {
-                int row_index = row*(number_of_Chebyshev_points-1);
-                int col_index = col*(number_of_Chebyshev_points-1);
-                A_NN(row_index, col_index) = A_at_chebyshev_point(row, col);
-            }
-        }
-
- 
+        // //  Build the A_NN matrix
         // for (unsigned int row = 0; row < lambda_dimension/2; ++row) {
         //     for (unsigned int col = 0; col < lambda_dimension/2; ++col) {
-        //         int row_index = row*(number_of_Chebyshev_points-1)+i;
-        //         int col_index = col*(number_of_Chebyshev_points-1)+i;
-        //         C_NN(row_index, col_index) = D_NN(row_index, col_index) - A_at_chebyshev_point(row, col);
-        //         std::cout<<row_index<<","<<col_index<<" = "<<row_index<<","<<col_index<<" - "<<row<<","<<col<<std::endl;
+        //         int row_index = row*(number_of_Chebyshev_points-1);
+        //         int col_index = col*(number_of_Chebyshev_points-1);
+        //         A_NN(row_index, col_index) = A_at_chebyshev_point(row, col);
         //     }
         // }
+
+ 
+        for (unsigned int row = 0; row < lambda_dimension/2; ++row) {
+            for (unsigned int col = 0; col < lambda_dimension/2; ++col) {
+                int row_index = row*(number_of_Chebyshev_points-1)+i;
+                int col_index = col*(number_of_Chebyshev_points-1)+i;
+                C_NN(row_index, col_index) = D_NN(row_index, col_index) - A_at_chebyshev_point(row, col);
+                std::cout<<row_index<<","<<col_index<<" = "<<row_index<<","<<col_index<<" - "<<row<<","<<col<<std::endl;
+            }
+        }
     }
     
-    C_NN = D_NN - A_NN;
+    // C_NN = D_NN - A_NN;
 
     return C_NN;
 }

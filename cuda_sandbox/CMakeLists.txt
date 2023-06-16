@@ -247,7 +247,7 @@ target_link_libraries(${PROJECT_NAME}_main_benchmark_GPU
         cublas
         Eigen3::Eigen
         benchmark::benchmark
-)
+        )
 # Add custom command to export benchmark results as CSV
 add_custom_command(TARGET ${PROJECT_NAME}_main_benchmark_GPU POST_BUILD
     COMMAND ${PROJECT_NAME}_main_benchmark_GPU --benchmark_out_format=csv --benchmark_out="main_benchmark_GPU_result.csv"
