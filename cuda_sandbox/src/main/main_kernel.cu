@@ -19,6 +19,12 @@
 #include <unsupported/Eigen/KroneckerProduct>
 
 
+// CUDA specific variables
+const auto size_of_double = sizeof(double);
+cusolverDnHandle_t cusolverH = NULL;
+cublasHandle_t cublasH = NULL;
+
+
 static const unsigned int number_of_Chebyshev_points = 16;
 
 static const unsigned int quaternion_state_dimension = 4;
@@ -29,7 +35,12 @@ static const unsigned int lambda_dimension = 6;
 
 static const unsigned int Qa_dimension = 9;
 
+
+// Defining qe in the CPU and its GPU parameters
 Eigen::Matrix<double, ne*na, 1> qe;
+double* d_qe = nullptr;
+int size_of_qe_in_bytes = ne * na * size_of_double;
+
 
 //  Obtain the Chebyshev differentiation matrix
 const Eigen::MatrixXd Dn = getDn<number_of_Chebyshev_points>();
@@ -47,42 +58,114 @@ const Eigen::MatrixXd Dn_NN_B = Dn.block<number_of_Chebyshev_points-1, number_of
 const Eigen::MatrixXd Dn_IN_B = Dn.block<number_of_Chebyshev_points-1, 1>(1, 0);
 
 
-// CUDA specific variables
-const auto size_of_double = sizeof(double);
-cusolverDnHandle_t cusolverH = NULL;
-cublasHandle_t cublasH = NULL;
+// Define the Chebyshev points on the unit circle
+const auto Chebyshev_points = ComputeChebyshevPoints<number_of_Chebyshev_points>();
+Eigen::MatrixXd Phi_stack = Eigen::MatrixXd::Zero(na*number_of_Chebyshev_points, na*ne);
 
 
-// Used to build Q_stack
+// K_stack parameters for GPU
+double* d_K_stack = nullptr;
+int size_of_K_stack_in_bytes = na * number_of_Chebyshev_points * size_of_double;
 
-__global__ void computeCMatrixKernel(const double* t_qe, const double* D_NN, double* C_NN) {
+
+
+// Function Definitions
+
+__global__ void computeCMatrixKernel(const double* d_K_stack, const double* D_NN, double* C_NN) {
 
     int i = threadIdx.x;
 
-    // Define the Chebyshev points on the unit circle
-    const auto Chebyshev_points = ComputeChebyshevPoints<number_of_Chebyshev_points>();
-
-    Eigen::Vector3d K;
-    Eigen::MatrixXd Z_at_chebyshev_point(quaternion_state_dimension, quaternion_state_dimension);
-    Eigen::MatrixXd A_at_chebyshev_point(quaternion_state_dimension, quaternion_state_dimension);
 
     // Extract the curvature from the strain and compute A_at_chebyshev_point
-    K = Phi<na, ne>(Chebyshev_points[i]) * Eigen::Map<const Eigen::Vector3d>(t_qe);
+    // Z_at_chebyshev_point <<      0, -K(0),  -K(1),  -K(2),
+    //                             K(0),     0,   K(2),  -K(1),
+    //                             K(1), -K(2),      0,   K(0),
+    //                             K(2),  K(1),  -K(0),      0;
 
-    Z_at_chebyshev_point <<      0, -K(0),  -K(1),  -K(2),
-                                K(0),     0,   K(2),  -K(1),
-                                K(1), -K(2),      0,   K(0),
-                                K(2),  K(1),  -K(0),      0;
+    // A_at_chebyshev_point = 0.5 * Z_at_chebyshev_point;
 
-    A_at_chebyshev_point = 0.5 * Z_at_chebyshev_point;
+    #pragma region Compute_C_NN
+    int row = 0;
+    int col = 1;
+    int row_index = row * (number_of_Chebyshev_points - 1) + i;
+    int col_index = col * (number_of_Chebyshev_points - 1) + i;
+    C_NN[row_index * quaternion_state_dimension + col_index] = D_NN[row_index * quaternion_state_dimension + col_index] + 0.5*d_K_stack[3*i+0];
 
-    for (unsigned int row = 0; row < quaternion_state_dimension; ++row) {
-        for (unsigned int col = 0; col < quaternion_state_dimension; ++col) {
-            int row_index = row * (number_of_Chebyshev_points - 1) + i;
-            int col_index = col * (number_of_Chebyshev_points - 1) + i;
-            C_NN[row_index * quaternion_state_dimension + col_index] = D_NN[row_index * quaternion_state_dimension + col_index] - A_at_chebyshev_point(row, col);
-        }
-    }
+
+    row = 0;
+    col = 2;
+    row_index = row * (number_of_Chebyshev_points - 1) + i;
+    col_index = col * (number_of_Chebyshev_points - 1) + i;
+    C_NN[row_index * quaternion_state_dimension + col_index] = D_NN[row_index * quaternion_state_dimension + col_index] + 0.5*d_K_stack[3*i+1];
+
+    row = 0;
+    col = 3;
+    row_index = row * (number_of_Chebyshev_points - 1) + i;
+    col_index = col * (number_of_Chebyshev_points - 1) + i;
+    C_NN[row_index * quaternion_state_dimension + col_index] = D_NN[row_index * quaternion_state_dimension + col_index] + 0.5*d_K_stack[3*i+2];
+
+    row = 1;
+    col = 0;
+    row_index = row * (number_of_Chebyshev_points - 1) + i;
+    col_index = col * (number_of_Chebyshev_points - 1) + i;
+    C_NN[row_index * quaternion_state_dimension + col_index] = D_NN[row_index * quaternion_state_dimension + col_index] - 0.5*d_K_stack[3*i+0];
+
+    row = 1;
+    col = 2;
+    row_index = row * (number_of_Chebyshev_points - 1) + i;
+    col_index = col * (number_of_Chebyshev_points - 1) + i;
+    C_NN[row_index * quaternion_state_dimension + col_index] = D_NN[row_index * quaternion_state_dimension + col_index] - 0.5*d_K_stack[3*i+2];
+
+    row = 1;
+    col = 3;
+    row_index = row * (number_of_Chebyshev_points - 1) + i;
+    col_index = col * (number_of_Chebyshev_points - 1) + i;
+    C_NN[row_index * quaternion_state_dimension + col_index] = D_NN[row_index * quaternion_state_dimension + col_index] + 0.5*d_K_stack[3*i+1];
+
+    row = 2;
+    col = 0;
+    row_index = row * (number_of_Chebyshev_points - 1) + i;
+    col_index = col * (number_of_Chebyshev_points - 1) + i;
+    C_NN[row_index * quaternion_state_dimension + col_index] = D_NN[row_index * quaternion_state_dimension + col_index] - 0.5*d_K_stack[3*i+1];
+
+    row = 2;
+    col = 1;
+    row_index = row * (number_of_Chebyshev_points - 1) + i;
+    col_index = col * (number_of_Chebyshev_points - 1) + i;
+    C_NN[row_index * quaternion_state_dimension + col_index] = D_NN[row_index * quaternion_state_dimension + col_index] + 0.5*d_K_stack[3*i+2];
+
+    row = 2;
+    col = 3;
+    row_index = row * (number_of_Chebyshev_points - 1) + i;
+    col_index = col * (number_of_Chebyshev_points - 1) + i;
+    C_NN[row_index * quaternion_state_dimension + col_index] = D_NN[row_index * quaternion_state_dimension + col_index] - 0.5*d_K_stack[3*i+0];
+
+    row = 3;
+    col = 0;
+    row_index = row * (number_of_Chebyshev_points - 1) + i;
+    col_index = col * (number_of_Chebyshev_points - 1) + i;
+    C_NN[row_index * quaternion_state_dimension + col_index] = D_NN[row_index * quaternion_state_dimension + col_index] - 0.5*d_K_stack[3*i+2];
+
+    row = 3;
+    col = 1;
+    row_index = row * (number_of_Chebyshev_points - 1) + i;
+    col_index = col * (number_of_Chebyshev_points - 1) + i;
+    C_NN[row_index * quaternion_state_dimension + col_index] = D_NN[row_index * quaternion_state_dimension + col_index] - 0.5*d_K_stack[3*i+1];
+
+    row = 3;
+    col = 2;
+    row_index = row * (number_of_Chebyshev_points - 1) + i;
+    col_index = col * (number_of_Chebyshev_points - 1) + i;
+    C_NN[row_index * quaternion_state_dimension + col_index] = D_NN[row_index * quaternion_state_dimension + col_index] + 0.5*d_K_stack[3*i+0];
+    #pragma endregion
+
+    // for (unsigned int row = 0; row < quaternion_state_dimension; ++row) {
+    //     for (unsigned int col = 0; col < quaternion_state_dimension; ++col) {
+    //         int row_index = row * (number_of_Chebyshev_points - 1) + i;
+    //         int col_index = col * (number_of_Chebyshev_points - 1) + i;
+    //         C_NN[row_index * quaternion_state_dimension + col_index] = D_NN[row_index * quaternion_state_dimension + col_index] - A_at_chebyshev_point(row, col);
+    //     }
+    // }
 }
 
 /*
@@ -146,26 +229,60 @@ Eigen::MatrixXd computeCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixX
 }
 */
 
+// Used to build Q_stack
 Eigen::VectorXd integrateQuaternions()
 {
+    #pragma region K_stack
+
+    // Allocate memory on the device
+    double* d_Phi_stack = nullptr;
+
+    int size_of_Phi_stack_in_bytes = (na * number_of_Chebyshev_points) * (na * ne) * size_of_double;
+
+
+    CUDA_CHECK(cudaMalloc((void**)&d_Phi_stack, size_of_Phi_stack_in_bytes));
+    CUDA_CHECK(cudaMalloc((void**)&d_qe, size_of_qe_in_bytes));
+    CUDA_CHECK(cudaMalloc((void**)&d_K_stack, size_of_K_stack_in_bytes));
+
+    // Copy input data from host to device
+    CUDA_CHECK(cudaMemcpy(d_Phi_stack, Phi_stack.data(), size_of_Phi_stack_in_bytes, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_qe, qe.data(), size_of_qe_in_bytes, cudaMemcpyHostToDevice));
+
+    // Define stride values
+    int ld_Phi_stack = na; // Leading dimension of matrix A
+    int inc_qe = 1; // Increment for x
+    int inc_K_stack = 1; // Increment for y
+    int stride_Phi_stack = na * (na * ne); // Stride between matrices in A
+    int stride_qe = 0; // Stride between vectors in x
+    int stride_K_stack = na; // Stride between vectors in y
+
+    // Perform gemvStridedBatched operation
+    double alpha_cublas = 1.0; // Scalar alpha
+    double beta_cublas = 0.0; // Scalar beta
+    CUBLAS_CHECK(cublasDgemvStridedBatched(cublasH, CUBLAS_OP_N, na, na*ne, &alpha_cublas, d_Phi_stack, ld_Phi_stack, stride_Phi_stack,
+                                            d_qe, inc_qe, stride_qe, &beta_cublas, d_K_stack, inc_K_stack, stride_K_stack, number_of_Chebyshev_points));
+    
+    #pragma endregion
+
+
     //  Now stack the matrices in the diagonal of bigger ones (as meny times as the state dimension)
     const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(quaternion_state_dimension, quaternion_state_dimension), Dn_NN_F);
     const Eigen::MatrixXd D_IN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(quaternion_state_dimension, quaternion_state_dimension), Dn_IN_F);
 
-    Eigen::MatrixXd C_NN = D_NN;
 
+    //Compute C_NN
+    Eigen::MatrixXd C_NN = D_NN;
+    
     // Compute the memory occupation 
-    const auto size_of_qe_in_bytes = qe.size()*size_of_double;
     const auto size_of_D_NN_in_bytes = D_NN.size() * size_of_double;
     
     // Create Pointers
-    double* d_t_qe;
     double* d_D_NN;
     double* d_C_NN;
 
     // Allocate the memory
     CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_t_qe), size_of_qe_in_bytes)
+        cudaMalloc(reinterpret_cast<void **>(&d_qe), size_of_qe_in_bytes)
     );
     CUDA_CHECK(
         cudaMalloc(reinterpret_cast<void **>(&d_D_NN), size_of_D_NN_in_bytes)
@@ -176,9 +293,6 @@ Eigen::VectorXd integrateQuaternions()
 
     //  Copy the data
     CUDA_CHECK(
-        cudaMemcpy(d_t_qe, qe.data(), size_of_qe_in_bytes, cudaMemcpyHostToDevice)
-    );
-    CUDA_CHECK(
         cudaMemcpy(d_D_NN, D_NN.data(), size_of_D_NN_in_bytes, cudaMemcpyHostToDevice)
     );
     CUDA_CHECK(
@@ -186,11 +300,11 @@ Eigen::VectorXd integrateQuaternions()
     );
 
     // Launch kernel with one block
-    computeCMatrixKernel<<<1, number_of_Chebyshev_points>>>(d_t_qe, d_D_NN, d_C_NN);
+    computeCMatrixKernel<<<1, number_of_Chebyshev_points>>>(d_K_stack, d_D_NN, d_C_NN);
 
     // Free the memory
     CUDA_CHECK(
-        cudaFree(d_t_qe)
+        cudaFree(d_qe)
     );
     CUDA_CHECK(
         cudaFree(d_D_NN)
@@ -300,8 +414,8 @@ Eigen::VectorXd integrateQuaternions()
     Eigen::MatrixXd Q_stack_CUDA(rows_Q_stack, cols_Q_stack);
 
     // Computing b = -D_IN*q_init + b
-    double alpha_cublas = -1.0;
-    double beta_cublas = 1.0;
+    alpha_cublas = -1.0;
+    beta_cublas = 1.0;
 
 
     CUBLAS_CHECK(
@@ -1054,8 +1168,13 @@ int main(int argc, char *argv[])
             0,
             0,
             0;
-    //qe.setZero();
+    // qe.setZero();
     
+
+    // Here we give some value for the strain rate
+    for (unsigned int i = 0; i < number_of_Chebyshev_points; ++i) {
+        Phi_stack.block<na, ne>(i*na, 0) =  Phi<na, ne>(Chebyshev_points[i]);
+    }
 
     const auto Q_stack_CUDA = integrateQuaternions();
     std::cout << "Quaternion Integration : \n" << Q_stack_CUDA << std::endl;
