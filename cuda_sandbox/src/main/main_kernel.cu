@@ -60,15 +60,15 @@ __global__ void computeCMatrixKernel(const double* t_qe, const double* D_NN, dou
     int i = threadIdx.x;
 
     // Define the Chebyshev points on the unit circle
-    const auto Chebyshev_points = ComputeChebyshevPoints();
+    const auto Chebyshev_points = ComputeChebyshevPoints<number_of_Chebyshev_points>();
 
     Eigen::Vector3d K;
     Eigen::MatrixXd Z_at_chebyshev_point(quaternion_state_dimension, quaternion_state_dimension);
     Eigen::MatrixXd A_at_chebyshev_point(quaternion_state_dimension, quaternion_state_dimension);
 
     // Extract the curvature from the strain and compute A_at_chebyshev_point
-    K = Phi<na, ne>(Chebyshev_points[i]) * t_qe;
-    
+    K = Phi<na, ne>(Chebyshev_points[i]) * Eigen::Map<const Eigen::Vector3d>(t_qe);
+
     Z_at_chebyshev_point <<      0, -K(0),  -K(1),  -K(2),
                                 K(0),     0,   K(2),  -K(1),
                                 K(1), -K(2),      0,   K(0),
@@ -80,20 +80,20 @@ __global__ void computeCMatrixKernel(const double* t_qe, const double* D_NN, dou
         for (unsigned int col = 0; col < quaternion_state_dimension; ++col) {
             int row_index = row * (number_of_Chebyshev_points - 1) + i;
             int col_index = col * (number_of_Chebyshev_points - 1) + i;
-            C_NN[row_index * quaternion_state_dimension + col_index] =
-                D_NN[row_index * quaternion_state_dimension + col_index] - A_at_chebyshev_point(row, col);
+            C_NN[row_index * quaternion_state_dimension + col_index] = D_NN[row_index * quaternion_state_dimension + col_index] - A_at_chebyshev_point(row, col);
         }
     }
 }
 
+/*
 Eigen::MatrixXd computeCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixXd &D_NN)
 {
     Eigen::MatrixXd C_NN = D_NN;
 
     // Compute the memory occupation 
     const auto size_of_t_qe_in_bytes = t_qe.size()*size_of_double;
-    const auto size_of_D_NN_in_bytes = D_NN.size() * size_of_double:
-    const auto size_of_C_NN_in_bytes = C_NN.size() * size_of_double:
+    const auto size_of_D_NN_in_bytes = D_NN.size() * size_of_double;
+    const auto size_of_C_NN_in_bytes = C_NN.size() * size_of_double;
     
     // Create Pointers
     double* d_t_qe;
@@ -144,6 +144,7 @@ Eigen::MatrixXd computeCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixX
 
     return C_NN;
 }
+*/
 
 Eigen::VectorXd integrateQuaternions()
 {
@@ -151,7 +152,49 @@ Eigen::VectorXd integrateQuaternions()
     const Eigen::MatrixXd D_NN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(quaternion_state_dimension, quaternion_state_dimension), Dn_NN_F);
     const Eigen::MatrixXd D_IN = Eigen::KroneckerProduct<Eigen::MatrixXd,Eigen::MatrixXd>(Eigen::MatrixXd::Identity(quaternion_state_dimension, quaternion_state_dimension), Dn_IN_F);
 
-    Eigen::MatrixXd C_NN =  computeCMatrix(qe, D_NN);
+    Eigen::MatrixXd C_NN = D_NN;
+
+    // Compute the memory occupation 
+    const auto size_of_qe_in_bytes = qe.size()*size_of_double;
+    const auto size_of_D_NN_in_bytes = D_NN.size() * size_of_double;
+    
+    // Create Pointers
+    double* d_t_qe;
+    double* d_D_NN;
+    double* d_C_NN;
+
+    // Allocate the memory
+    CUDA_CHECK(
+        cudaMalloc(reinterpret_cast<void **>(&d_t_qe), size_of_qe_in_bytes)
+    );
+    CUDA_CHECK(
+        cudaMalloc(reinterpret_cast<void **>(&d_D_NN), size_of_D_NN_in_bytes)
+    );
+    CUDA_CHECK(
+        cudaMalloc(reinterpret_cast<void **>(&d_C_NN), size_of_D_NN_in_bytes) //Same size as D_NN
+    );
+
+    //  Copy the data
+    CUDA_CHECK(
+        cudaMemcpy(d_t_qe, qe.data(), size_of_qe_in_bytes, cudaMemcpyHostToDevice)
+    );
+    CUDA_CHECK(
+        cudaMemcpy(d_D_NN, D_NN.data(), size_of_D_NN_in_bytes, cudaMemcpyHostToDevice)
+    );
+    CUDA_CHECK(
+        cudaMemcpy(d_C_NN, C_NN.data(), size_of_D_NN_in_bytes, cudaMemcpyHostToDevice)
+    );
+
+    // Launch kernel with one block
+    computeCMatrixKernel<<<1, number_of_Chebyshev_points>>>(d_t_qe, d_D_NN, d_C_NN);
+
+    // Free the memory
+    CUDA_CHECK(
+        cudaFree(d_t_qe)
+    );
+    CUDA_CHECK(
+        cudaFree(d_D_NN)
+    );
 
     Eigen::MatrixXd q_init(4,1);
     q_init << 1, 0, 0, 0;
@@ -191,7 +234,7 @@ Eigen::VectorXd integrateQuaternions()
     double* d_b = nullptr;
     double* d_res = nullptr;
     double* d_Q_stack = nullptr;
-    double* d_C_NN = nullptr;
+    //double* d_C_NN = nullptr;
     double* d_work = nullptr;
     int* d_info = nullptr;
 
@@ -201,7 +244,6 @@ Eigen::VectorXd integrateQuaternions()
     const auto size_of_b_in_bytes = size_of_double * b.size();
     const auto size_of_res_in_bytes = size_of_double * rows_res * cols_res;
     const auto size_of_Q_stack_in_bytes = size_of_double * rows_Q_stack * cols_Q_stack;
-    const auto size_of_C_NN_in_bytes = size_of_double * C_NN.size();
 
     // Allocate the memory
     CUDA_CHECK(
@@ -219,9 +261,9 @@ Eigen::VectorXd integrateQuaternions()
     CUDA_CHECK(
         cudaMalloc(reinterpret_cast<void **>(&d_Q_stack), size_of_Q_stack_in_bytes)
     );
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_C_NN), size_of_C_NN_in_bytes)
-    );
+    // CUDA_CHECK(
+    //     cudaMalloc(reinterpret_cast<void **>(&d_C_NN), size_of_C_NN_in_bytes)
+    // );
     CUDA_CHECK(
         cudaMalloc(reinterpret_cast<void **>(&d_info), sizeof(int))
     );
@@ -236,9 +278,9 @@ Eigen::VectorXd integrateQuaternions()
     CUDA_CHECK(
         cudaMemcpy(d_b, b.data(), size_of_b_in_bytes, cudaMemcpyHostToDevice)
     );
-    CUDA_CHECK(
-        cudaMemcpy(d_C_NN, C_NN.data(), size_of_C_NN_in_bytes, cudaMemcpyHostToDevice)
-    );
+    // CUDA_CHECK(
+    //     cudaMemcpy(d_C_NN, C_NN.data(), size_of_C_NN_in_bytes, cudaMemcpyHostToDevice)
+    // );
     CUDA_CHECK(
         cudaMemcpy(d_info, &info, sizeof(int), cudaMemcpyHostToDevice)
     );
@@ -1018,17 +1060,17 @@ int main(int argc, char *argv[])
     const auto Q_stack_CUDA = integrateQuaternions();
     std::cout << "Quaternion Integration : \n" << Q_stack_CUDA << std::endl;
     
-    const auto r_stack_CUDA = integratePosition(Q_stack_CUDA);
-    std::cout << "Position Integration : \n" << r_stack_CUDA << std::endl;
+    // const auto r_stack_CUDA = integratePosition(Q_stack_CUDA);
+    // std::cout << "Position Integration : \n" << r_stack_CUDA << std::endl;
 
-    const auto N_stack_CUDA = integrateInternalForces(Q_stack_CUDA);
-    std::cout << "Internal Forces Integration : \n" << N_stack_CUDA << "\n" << std::endl;
+    // const auto N_stack_CUDA = integrateInternalForces(Q_stack_CUDA);
+    // std::cout << "Internal Forces Integration : \n" << N_stack_CUDA << "\n" << std::endl;
 
-    const auto C_stack_CUDA = integrateInternalCouples(N_stack_CUDA);
-    std::cout << "Internal Couples Integration : \n" << C_stack_CUDA << "\n" << std::endl;
+    // const auto C_stack_CUDA = integrateInternalCouples(N_stack_CUDA);
+    // std::cout << "Internal Couples Integration : \n" << C_stack_CUDA << "\n" << std::endl;
 
-    std::cout << "Internal Forces MATRIX : \n" << toMatrix(N_stack_CUDA, number_of_Chebyshev_points) << "\n" << std::endl;
-    std::cout << "Internal Couples MATRIX : \n" << toMatrix(C_stack_CUDA, number_of_Chebyshev_points) << "\n" << std::endl;
+    // std::cout << "Internal Forces MATRIX : \n" << toMatrix(N_stack_CUDA, number_of_Chebyshev_points) << "\n" << std::endl;
+    // std::cout << "Internal Couples MATRIX : \n" << toMatrix(C_stack_CUDA, number_of_Chebyshev_points) << "\n" << std::endl;
     
     // const auto Lambda_stack_CUDA = buildLambda(C_stack_CUDA, N_stack_CUDA);
     // //std::cout << "Lambda_stack : \n" << Lambda_stack_CUDA << "\n" << std::endl;

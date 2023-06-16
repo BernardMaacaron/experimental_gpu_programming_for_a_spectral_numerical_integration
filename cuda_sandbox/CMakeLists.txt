@@ -129,6 +129,28 @@ target_link_libraries(${PROJECT_NAME}_main
         Eigen3::Eigen
 )
 
+#MAIN_KERNEL Executable
+#MAIN Executable
+add_executable(${PROJECT_NAME}_main_kernel
+        src/main/main_kernel.cu
+        include/chebyshev_differentiation.h
+        include/utilities.h
+        include/spectral_integration_utilities.h
+        include/lie_algebra_utilities.h
+        include/globals.h
+        include/getCusolverErrorString.h
+)
+target_include_directories(${PROJECT_NAME}_main_kernel
+    PUBLIC
+        ${CUDA_INCLUDE_DIRS}
+)
+target_link_libraries(${PROJECT_NAME}_main_kernel
+    PUBLIC
+        cusolver
+        cublas
+        Eigen3::Eigen
+)
+
 
 #MATMUL BENCHMARK Executable
 add_executable(${PROJECT_NAME}_matMul_benchmark
@@ -182,17 +204,17 @@ add_custom_command(TARGET ${PROJECT_NAME}_matLU_benchmark POST_BUILD
 
 
 #MATINVBENCHMARK Executable
-add_executable(${PROJECT_NAME}_matInv_benchmark
-        src/benchmark_2023/matInv_benchmark.cu
+add_executable(${PROJECT_NAME}_matSys_benchmark
+        src/benchmark_2023/matSys_benchmark.cu
         include/utilities.h
         include/getCusolverErrorString.h
         include/benchmark_csv_exporter.h
 )
-target_include_directories(${PROJECT_NAME}_matInv_benchmark
+target_include_directories(${PROJECT_NAME}_matSys_benchmark
     PUBLIC
         ${CUDA_INCLUDE_DIRS}
 )
-target_link_libraries(${PROJECT_NAME}_matInv_benchmark
+target_link_libraries(${PROJECT_NAME}_matSys_benchmark
     PUBLIC
         cusolver
         cublas
@@ -200,7 +222,7 @@ target_link_libraries(${PROJECT_NAME}_matInv_benchmark
         benchmark::benchmark
 )
 # Add custom command to export benchmark results as CSV
-add_custom_command(TARGET ${PROJECT_NAME}_matInv_benchmark POST_BUILD
+add_custom_command(TARGET ${PROJECT_NAME}_matSys_benchmark POST_BUILD
     COMMAND ${PROJECT_NAME}_matInv_benchmark --benchmark_out_format=csv --benchmark_out="matInv_benchmark_result.csv"
     # ${PROJECT_NAME}_matMul_benchmark --benchmark_format=csv
     COMMENT "Exporting benchmark results to result.csv"
