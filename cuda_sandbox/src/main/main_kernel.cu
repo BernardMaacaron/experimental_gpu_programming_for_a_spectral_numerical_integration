@@ -69,10 +69,11 @@ __global__ void computeCMatrixKernel(const double* t_qe, const double* D_NN, dou
     // Extract the curvature from the strain and compute A_at_chebyshev_point
     K = Phi<na, ne>(Chebyshev_points[i]) * t_qe;
     
-    Z_at_chebyshev_point << 0, -K(0), -K(1), -K(2),
-                            K(0), 0, K(2), -K(1),
-                            K(1), -K(2), 0, K(0),
-                            K(2), K(1), -K(0), 0;
+    Z_at_chebyshev_point <<      0, -K(0),  -K(1),  -K(2),
+                                K(0),     0,   K(2),  -K(1),
+                                K(1), -K(2),      0,   K(0),
+                                K(2),  K(1),  -K(0),      0;
+
     A_at_chebyshev_point = 0.5 * Z_at_chebyshev_point;
 
     for (unsigned int row = 0; row < quaternion_state_dimension; ++row) {
@@ -117,13 +118,29 @@ Eigen::MatrixXd computeCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixX
     CUDA_CHECK(
         cudaMemcpy(d_D_NN, D_NN.data(), size_of_D_NN_in_bytes, cudaMemcpyHostToDevice)
     );
+    CUDA_CHECK(
+        cudaMemcpy(d_C_NN, C_NN.data(), size_of_C_NN_in_bytes, cudaMemcpyHostToDevice)
+    );
 
     // Launch kernel with one block
     int threadsPerBlock = number_of_Chebyshev_points;
     computeCMatrixKernel<<<1, threadsPerBlock>>>(d_t_qe, d_D_NN, d_C_NN);
 
     // Copy result back 
-    cudaMemcpy(C_NN.data(), d_C_NN, C_NN.size() * size_of_double,
+    CUDA_CHECK(
+        cudaMemcpy(C_NN.data(), d_C_NN, size_of_C_NN_in_bytes, cudaMemcpyDeviceToHost);
+    );
+
+    // Free the memory
+    CUDA_CHECK(
+        cudaFree(t_qe)
+    );
+    CUDA_CHECK(
+        cudaFree(D_NN)
+    );
+    CUDA_CHECK(
+        cudaFree(C_NN)
+    );
 
     return C_NN;
 }
