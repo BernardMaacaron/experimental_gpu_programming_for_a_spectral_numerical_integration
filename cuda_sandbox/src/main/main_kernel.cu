@@ -68,7 +68,6 @@ double* d_K_stack = nullptr;
 int size_of_K_stack_in_bytes = na * number_of_Chebyshev_points * size_of_double;
 
 
-
 // Function Definitions
 
 __global__ void computeCMatrixKernel(const double* d_K_stack, const double* D_NN, double* C_NN) {
@@ -561,21 +560,11 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
     double* d_Dn_IN_F;
 
     // Allocate the memory
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_Q_stack_CUDA), size_of_Q_stack_CUDA_in_bytes)
-    );
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_b), size_of_b_in_bytes)
-    );
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_r_init), size_of_r_init_in_bytes)
-    );
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_ivp), size_of_ivp_in_bytes)
-    );
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_Dn_IN_F), size_of_Dn_IN_F_in_bytes)
-    );
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_Q_stack_CUDA), size_of_Q_stack_CUDA_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_b), size_of_b_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_r_init), size_of_r_init_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_ivp), size_of_ivp_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_Dn_IN_F), size_of_Dn_IN_F_in_bytes));
 
     //  Copy the data
     CUDA_CHECK(
@@ -691,7 +680,6 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
 Eigen::MatrixXd updateCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixXd &D_NN)
 {
     Eigen::MatrixXd C_NN = D_NN;
-
     //  Define the Chebyshev points on the unit circle
     const auto Chebyshev_points = ComputeChebyshevPoints<number_of_Chebyshev_points>();
 
@@ -721,41 +709,61 @@ Eigen::MatrixXd updateCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixXd
 
 }
 
-Eigen::VectorXd computeNbar (Eigen::MatrixXd t_Q_stack_CUDA) 
-{
-    // Variables definition to include gravity (Nbar)
+__global__ void computeNbarKernel(const double* t_Q_stack_CUDA_data, double* Nbar_stack_data) {
+int i = threadIdx.x;
+
     const double g = 9.81; // m/s^2
     const double radius = 0.001; // m
-    const double A = M_PI*radius*radius;
+    const double A = M_PI * radius * radius;
     const double rho = 7800; // kg/m^3
 
-    Eigen::VectorXd Fg(lambda_dimension/2);
-    Fg << 0, 0, -A*g*rho;
-    
-    Eigen::Matrix3d R = Eigen::Matrix3d::Zero();
-    Eigen::VectorXd Nbar = Eigen::VectorXd::Zero(lambda_dimension/2);
-    Eigen::VectorXd Nbar_stack = Eigen::VectorXd::Zero((lambda_dimension/2)*(number_of_Chebyshev_points-1));
+    Eigen::Map<const Eigen::VectorXd> t_Q_stack_CUDA(t_Q_stack_CUDA_data, (number_of_Chebyshev_points - 1) * 4);
+    Eigen::Map<Eigen::VectorXd> Nbar_stack(Nbar_stack_data, (number_of_Chebyshev_points - 1) * 3);
 
-    // to fix
-    for (unsigned int i = 0; i < number_of_Chebyshev_points-1; ++i) {
+    if (i < number_of_Chebyshev_points - 1) {
+        Eigen::Quaterniond Qbar(t_Q_stack_CUDA(i), t_Q_stack_CUDA(i + (number_of_Chebyshev_points - 1)),
+                                t_Q_stack_CUDA(i + 2 * (number_of_Chebyshev_points - 1)),
+                                t_Q_stack_CUDA(i + 3 * (number_of_Chebyshev_points - 1)));
 
-        Eigen::Quaterniond Qbar(t_Q_stack_CUDA(i),
-              t_Q_stack_CUDA(i  +  (number_of_Chebyshev_points-1)),
-              t_Q_stack_CUDA(i + 2*(number_of_Chebyshev_points-1)),
-              t_Q_stack_CUDA(i + 3*(number_of_Chebyshev_points-1)));
+        double R[9];
+        quaternionToRotationMatrix(Qbar.coeffs().data(), R); //Qbar.coeffs().data() returns a pointer to the raw data of the quaternion coefficients of Qbar
 
-        
-        R = Qbar.toRotationMatrix();
-        Nbar = R.transpose()*Fg;
+        double Fg[3] = {0, 0, -A * g * rho};
+        double Nbar[3];
 
-        Nbar_stack(i) = Nbar.x();
-        Nbar_stack(i  +  (number_of_Chebyshev_points-1)) = Nbar.y();
-        Nbar_stack(i + 2*(number_of_Chebyshev_points-1)) = Nbar.z();
+        // Compute the memory occupation
+        const auto size_of_R_in_bytes = 9 * size_of_double;
+        const auto size_of_Fg_in_bytes = 3 * size_of_double;
+        const auto size_of_Nbar_in_bytes = 3 * size_of_double;
 
+        // Create Pointers
+        double* d_R;
+        double* d_Fg;
+        double* d_Nbar;
+
+        // Memory allocation
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_R), size_of_R_in_bytes));
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_Fg), size_of_Fg_in_bytes));
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_Nbar), size_of_Nbar_in_bytes));
+
+        CUDA_CHECK(cudaMemcpy(d_R, R, size_of_R_in_bytes, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(d_Fg, Fg, size_of_Fg_in_bytes, cudaMemcpyHostToDevice));
+
+        // cublasDgemm to perform Nbar = R.transpose()*Fg
+        double alpha_cublas = 1.0;
+        double beta_cublas = 0.0;
+        CUDA_CHECK(cublasDgemm(cublasH, CUBLAS_OP_T, CUBLAS_OP_N, 3, 1, 3, &alpha_cublas, d_R, 3, d_Fg, 1, &beta_cublas, d_Nbar, 1));
+
+        CUDA_CHECK(cudaMemcpy(Nbar, d_Nbar, 3 * sizeof(double), cudaMemcpyDeviceToHost));
+
+        Nbar_stack(i) = Nbar[0];
+        Nbar_stack(i + (number_of_Chebyshev_points - 1)) = Nbar[1];
+        Nbar_stack(i + 2 * (number_of_Chebyshev_points - 1)) = Nbar[2];
+
+        CUDA_CHECK(cudaFree(d_R));
+        CUDA_CHECK(cudaFree(d_Fg));
+        CUDA_CHECK(cudaFree(d_Nbar));
     }
-
-    return Nbar_stack;
-
 }
 
 Eigen::MatrixXd integrateInternalForces(Eigen::MatrixXd t_Q_stack_CUDA)
@@ -769,7 +777,30 @@ Eigen::MatrixXd integrateInternalForces(Eigen::MatrixXd t_Q_stack_CUDA)
     Eigen::VectorXd N_init(lambda_dimension/2);
     N_init << 1, 0, 0;
 
-    Eigen::MatrixXd beta = -computeNbar(t_Q_stack_CUDA);
+    Eigen::MatrixXd beta = Eigen::MatrixXd::Zero((lambda_dimension/2)*(number_of_Chebyshev_points-1),1);
+
+    // Create Pointers
+    double* d_Q_stack_CUDA = nullptr;
+    double* d_Nbar_stack = nullptr;
+
+    // Compute the memory occupation
+    const auto size_of_Q_stack_CUDA_in_bytes = size_of_double * t_Q_stack_CUDA.size();
+    const auto size_of_Nbar_stack_in_bytes = size_of_double * beta.size(); // Same dimension of beta (beta = -Nbar)
+
+    // Allocate the memory
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_Q_stack_CUDA), size_of_Q_stack_CUDA_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_Nbar_stack), size_of_Nbar_stack_in_bytes));
+
+    //  Copy the data: cudaMemcpy(destination, file_to_copy, size_of_the_file, std_cmd)
+    CUDA_CHECK(cudaMemcpy(d_Q_stack_CUDA, t_Q_stack_CUDA.data(), size_of_Q_stack_CUDA_in_bytes, cudaMemcpyHostToDevice));
+
+    // Launch the kernel: computeNbarKernel
+    computeNbarKernel<<<1, number_of_Chebyshev_points - 1>>>(d_Q_stack_CUDA, d_Nbar_stack);
+
+    //  Copy the data
+    CUDA_CHECK(cudaMemcpy(beta.data(), d_Nbar_stack, size_of_Nbar_stack_in_bytes, cudaMemcpyDeviceToHost));
+
+    //Eigen::MatrixXd beta = -computeNbar(t_Q_stack_CUDA);
 
     //Definition of matrices dimensions.
     const int rows_C_NN = C_NN.rows();
@@ -811,41 +842,19 @@ Eigen::MatrixXd integrateInternalForces(Eigen::MatrixXd t_Q_stack_CUDA)
     const auto size_of_N_stack_in_bytes = size_of_double * rows_N_stack * cols_N_stack;
 
     // Allocate the memory
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_C_NN), size_of_C_NN_in_bytes)
-    );
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_D_IN), size_of_D_IN_in_bytes)
-    );
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_N_init), size_of_N_init_in_bytes)
-    );
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_beta), size_of_beta_in_bytes)
-    );
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_N_stack), size_of_N_stack_in_bytes)
-    );
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_info), sizeof(int))
-    );
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_C_NN), size_of_C_NN_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_D_IN), size_of_D_IN_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_N_init), size_of_N_init_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_beta), size_of_beta_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_N_stack), size_of_N_stack_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_info), sizeof(int)));
 
     //  Copy the data: cudaMemcpy(destination, file_to_copy, size_of_the_file, std_cmd)
-    CUDA_CHECK(
-        cudaMemcpy(d_C_NN, C_NN.data(), size_of_C_NN_in_bytes, cudaMemcpyHostToDevice)
-    );
-    CUDA_CHECK(
-        cudaMemcpy(d_D_IN, D_IN.data(), size_of_D_IN_in_bytes, cudaMemcpyHostToDevice)
-    );
-    CUDA_CHECK(
-        cudaMemcpy(d_N_init, N_init.data(), size_of_N_init_in_bytes, cudaMemcpyHostToDevice)
-    );
-    CUDA_CHECK(
-        cudaMemcpy(d_beta, beta.data(), size_of_beta_in_bytes, cudaMemcpyHostToDevice)
-    );
-    CUDA_CHECK(
-        cudaMemcpy(d_info, &info, sizeof(int), cudaMemcpyHostToDevice)
-    );
+    CUDA_CHECK(cudaMemcpy(d_C_NN, C_NN.data(), size_of_C_NN_in_bytes, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_D_IN, D_IN.data(), size_of_D_IN_in_bytes, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_N_init, N_init.data(), size_of_N_init_in_bytes, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_beta, beta.data(), size_of_beta_in_bytes, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_info, &info, sizeof(int), cudaMemcpyHostToDevice));
 
     // Allocates buffer size for the LU decomposition
     cusolverStatus_t status = cusolverDnDgetrf_bufferSize(cusolverH, cols_C_NN, cols_C_NN, d_C_NN, ld_C_NN, &lwork);
@@ -855,10 +864,7 @@ Eigen::MatrixXd integrateInternalForces(Eigen::MatrixXd t_Q_stack_CUDA)
         // Handle or debug the error appropriately
     };
 
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_work), size_of_double * lwork)
-    );
-
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_work), size_of_double * lwork));
 
     //What we want to calculate
     Eigen::MatrixXd N_stack_CUDA(rows_N_stack, cols_N_stack);
@@ -908,39 +914,74 @@ Eigen::MatrixXd integrateInternalForces(Eigen::MatrixXd t_Q_stack_CUDA)
     return N_stack_CUDA;
 }
 
-Eigen::MatrixXd updateCouplesb(Eigen::MatrixXd t_N_stack_CUDA) {
+__global__ void updateCouplesbKernel(const double* t_N_stack_CUDA, double* d_beta) {
+    int idx = threadIdx.x;
 
-    Eigen::MatrixXd beta((lambda_dimension/2)*(number_of_Chebyshev_points-1), 1); // Dimension: 45x1
+    if (idx < number_of_Chebyshev_points - 1) {
+        Eigen::VectorXd Gamma(lambda_dimension / 2);
+        Gamma << 1, 0, 0;
 
-    Eigen::VectorXd Gamma(lambda_dimension/2);
-    Gamma << 1, 0, 0;
+        // Construct the skew-symmetric matrix manually
+        Eigen::Matrix3d skewGamma;
+        skewGamma << 0, -Gamma(2), Gamma(1),
+                     Gamma(2), 0, -Gamma(0),
+                    -Gamma(1), Gamma(0), 0;
 
-    //  TODO: Update it to work with any possible C_bar
-    //  Building C_bar
-    const Eigen::Vector3d C_bar = Eigen::Vector3d::Zero();
+        const Eigen::Vector3d C_bar = Eigen::Vector3d::Zero();
+        Eigen::Vector3d N;
 
-    Eigen::Vector3d N;
+        int offset = idx * lambda_dimension / 2;
 
-    Eigen::Vector3d b;
+        for (int i = 0; i < lambda_dimension / 2; ++i) {
+            N(i) = t_N_stack_CUDA[offset + i];
+        }
 
+        // Dimensions definition
+        const int rows_skewGamma = 3;
+        const int cols_skewGamma = 3;        
+        const int ld_skewGamma = 3;
 
-    for (unsigned int i = 0; i < number_of_Chebyshev_points-1; ++i) {
+        const int rows_N = N.rows();
+        const int cols_N = N.cols();
+        const int ld_N = rows_N;
 
-        N << t_N_stack_CUDA(i),
-             t_N_stack_CUDA(i  +  (number_of_Chebyshev_points-1)),
-             t_N_stack_CUDA(i + 2*(number_of_Chebyshev_points-1));
+        const int rows_C_bar = C_bar.rows();
+        const int cols_C_bar = C_bar.cols();
+        const int ld_C_bar = rows_N;
 
+        const int ld_beta = (lambda_dimension/2)*(number_of_Chebyshev_points-1);
+        
+        // Create Pointers
+        double* d_skewGamma;
+        double* d_N;
+        double* d_C_bar;
 
-        b = skew(Gamma).transpose()*N-C_bar;
+        // Compute the memory occupation
+        const auto size_of_skewGamma_in_bytes = size_of_double * rows_skewGamma*cols_skewGamma;
+        const auto size_of_N_in_bytes = size_of_double * N.size();
+        const auto size_of_C_bar_in_bytes = size_of_double * C_bar.size();
 
-        beta(i) = b(0);
-        beta(i  +  (number_of_Chebyshev_points-1)) = b(1);
-        beta(i + 2*(number_of_Chebyshev_points-1)) = b(2);
+        // Allocate the memory
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_skewGamma), size_of_skewGamma_in_bytes));
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_N), size_of_N_in_bytes));
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_C_bar), size_of_C_bar_in_bytes));
 
+        //  Copy the data: cudaMemcpy(destination, file_to_copy, size_of_the_file, std_cmd)
+        CUDA_CHECK(cudaMemcpy(d_skewGamma, skewGamma.data(), size_of_skewGamma_in_bytes, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(d_N, D_N.data(), size_of_N_in_bytes, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(d_N, D_C_bar.data(), size_of_C_bar_in_bytes, cudaMemcpyHostToDevice));
+
+        // Perform b = skewGamma.transpose() * N - C_bar
+        const double alpha = 1.0;
+        const double beta = -1.0;
+        CUBLAS_CHECK(cublasDgemm(cublasH, CUBLAS_OP_T, CUBLAS_OP_N, rows_skewGamma, cols_N, cols_skewGamma, &alpha_cublas, d_skewGamma, ld_skewGamma, d_N, ld_N, &beta_cublas, d_beta, ld_beta));
+
+        CUDA_CHECK(cudaMemcpy(beta + offset, d_b, 3 * sizeof(double), cudaMemcpyDeviceToHost)); // I hope this works
+
+        cudaFree(d_skewGamma);
+        cudaFree(d_N);
+        cudaFree(d_beta);
     }
-
-
-    return beta;
 }
 
 Eigen::MatrixXd integrateInternalCouples(Eigen::MatrixXd t_N_stack_CUDA)
@@ -951,9 +992,29 @@ Eigen::MatrixXd integrateInternalCouples(Eigen::MatrixXd t_N_stack_CUDA)
 
     Eigen::MatrixXd C_NN =  updateCMatrix(qe, D_NN);
     
-    //beta_NN((lambda_dimension/2)*(number_of_Chebyshev_points-1), 1);
-    Eigen::MatrixXd beta_NN = updateCouplesb(t_N_stack_CUDA);
+    Eigen::MatrixXd beta_NN = Eigen::MatrixXd::Zero((lambda_dimension/2)*(number_of_Chebyshev_points-1), 1);
+    // Eigen::MatrixXd beta_NN = updateCouplesb(t_N_stack_CUDA);
 
+    // Create Pointers
+    double* d_N_stack_CUDA = nullptr;
+    double* d_beta = nullptr;
+
+    // Compute the memory occupation
+    const auto size_of_N_stack_CUDA_in_bytes = size_of_double * t_N_stack_CUDA.size();
+    const auto size_of_Nbar_stack_in_bytes = size_of_double * beta.size(); // Same dimension of beta (beta = -Nbar)
+
+    // Allocate the memory
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_N_stack_CUDA), size_of_N_stack_CUDA_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_beta), size_of_beta_in_bytes));
+
+    //  Copy the data: cudaMemcpy(destination, file_to_copy, size_of_the_file, std_cmd)
+    CUDA_CHECK(cudaMemcpy(d_N_stack_CUDA, t_N_stack_CUDA.data(), size_of_Q_stack_CUDA_in_bytes, cudaMemcpyHostToDevice));
+
+    // Launch the kernel: computeNbarKernel
+    updateCouplesbKernel<<<1, number_of_Chebyshev_points - 1>>>(d_t_N_stack_CUDA, d_beta);
+
+    //  Copy the data
+    CUDA_CHECK(cudaMemcpy(beta_NN.data(), d_beta, size_of_beta_in_bytes, cudaMemcpyDeviceToHost));
 
     Eigen::VectorXd C_init(lambda_dimension/2);
     C_init << 1, 0, 0;
@@ -997,38 +1058,18 @@ Eigen::MatrixXd integrateInternalCouples(Eigen::MatrixXd t_N_stack_CUDA)
     const auto size_of_N_stack_in_bytes = size_of_double * t_N_stack_CUDA.size();
 
     // Allocate the memory
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_C_NN), size_of_C_NN_in_bytes)
-    );
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_D_IN), size_of_D_IN_in_bytes)
-    );
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_C_init), size_of_C_init_in_bytes)
-    );
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_beta_NN), size_of_beta_NN_in_bytes)
-    );
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_info), sizeof(int))
-    );
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_C_NN), size_of_C_NN_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_D_IN), size_of_D_IN_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_C_init), size_of_C_init_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_beta_NN), size_of_beta_NN_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_info), sizeof(int)));
 
     //  Copy the data: cudaMemcpy(destination, file_to_copy, size_of_the_file, std_cmd)
-    CUDA_CHECK(
-        cudaMemcpy(d_C_NN, C_NN.data(), size_of_C_NN_in_bytes, cudaMemcpyHostToDevice)
-    );
-    CUDA_CHECK(
-        cudaMemcpy(d_D_IN, D_IN.data(), size_of_D_IN_in_bytes, cudaMemcpyHostToDevice)
-    );
-    CUDA_CHECK(
-        cudaMemcpy(d_C_init, C_init.data(), size_of_C_init_in_bytes, cudaMemcpyHostToDevice)
-    );
-    CUDA_CHECK(
-        cudaMemcpy(d_beta_NN, beta_NN.data(), size_of_beta_NN_in_bytes, cudaMemcpyHostToDevice)
-    );
-    CUDA_CHECK(
-        cudaMemcpy(d_info, &info, sizeof(int), cudaMemcpyHostToDevice)
-    );
+    CUDA_CHECK(cudaMemcpy(d_C_NN, C_NN.data(), size_of_C_NN_in_bytes, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_D_IN, D_IN.data(), size_of_D_IN_in_bytes, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_C_init, C_init.data(), size_of_C_init_in_bytes, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_beta_NN, beta_NN.data(), size_of_beta_NN_in_bytes, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_info, &info, sizeof(int), cudaMemcpyHostToDevice));
 
     // Allocates buffer size for the LU decomposition
     cusolverStatus_t status = cusolverDnDgetrf_bufferSize(cusolverH, rows_C_NN, cols_C_NN, d_C_NN, ld_C_NN, &lwork);
