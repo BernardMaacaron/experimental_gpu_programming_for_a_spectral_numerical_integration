@@ -61,6 +61,8 @@ const Eigen::MatrixXd Dn_IN_B = Dn.block<number_of_Chebyshev_points-1, 1>(1, 0);
 // Define the Chebyshev points on the unit circle
 const auto Chebyshev_points = ComputeChebyshevPoints<number_of_Chebyshev_points>();
 Eigen::MatrixXd Phi_stack = Eigen::MatrixXd::Zero(na*number_of_Chebyshev_points, na*ne);
+double* d_Phi_stack = nullptr;
+int size_of_Phi_stack_in_bytes = (na * number_of_Chebyshev_points) * (na * ne) * size_of_double;
 
 
 // K_stack parameters for GPU
@@ -240,11 +242,6 @@ Eigen::VectorXd integrateQuaternions()
     #pragma region K_stack
 
     // Allocate memory on the device
-    double* d_Phi_stack = nullptr;
-
-    int size_of_Phi_stack_in_bytes = (na * number_of_Chebyshev_points) * (na * ne) * size_of_double;
-
-
     CUDA_CHECK(cudaMalloc((void**)&d_Phi_stack, size_of_Phi_stack_in_bytes));
     CUDA_CHECK(cudaMalloc((void**)&d_qe, size_of_qe_in_bytes));
     CUDA_CHECK(cudaMalloc((void**)&d_K_stack, size_of_K_stack_in_bytes));
@@ -837,7 +834,7 @@ int i = threadIdx.x;
         double beta_cublas = 0.0;
         CUBLAS_CHECK(cublasDgemm(cublasH, CUBLAS_OP_T, CUBLAS_OP_N, 3, 1, 3, &alpha_cublas, d_R, 3, d_Fg, 1, &beta_cublas, d_Nbar, 1));
 
-        CUDA_CHECK(cudaMemcpy(Nbar, d_Nbar, 3 * sizeof(double), cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpy(Nbar, d_Nbar, 3 * size_of_double, cudaMemcpyDeviceToHost));
 
         Nbar_stack(i) = Nbar[0];
         Nbar_stack(i + (number_of_Chebyshev_points - 1)) = Nbar[1];
@@ -1044,6 +1041,8 @@ __global__ void updateCouplesbKernel(const double* t_N_stack_CUDA, double* d_bet
         const Eigen::Vector3d C_bar = Eigen::Vector3d::Zero();
         Eigen::Vector3d N;
 
+        int offset = idx * lambda_dimension / 2;
+
         for (int i = 0; i < lambda_dimension / 2; ++i) {
             N(i) = t_N_stack_CUDA[offset + i];
         }
@@ -1061,7 +1060,7 @@ __global__ void updateCouplesbKernel(const double* t_N_stack_CUDA, double* d_bet
         const int cols_C_bar = C_bar.cols();
         const int ld_C_bar = rows_N;
 
-        // const int ld_b = ld_C_bar;
+        const int ld_beta = ld_C_bar;
         
         // Create Pointers
         double* d_skewGamma = nullptr;
@@ -1308,37 +1307,6 @@ Eigen::MatrixXd buildLambda(Eigen::MatrixXd t_C_stack_CUDA, Eigen::MatrixXd t_N_
 
 
 // Used to build Qa_stack
-
-// CUDA kernel function to update Qad_vector_b
-__global__ void updateQad_vector_b_kernel(const double* t_Lambda_stack, double* B_NN) {
-
-    // Get the global thread index
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (tid < number_of_Chebyshev_points - 1) {
-        // Compute the starting index for the current Chebyshev point
-        int index = lambda_dimension * tid;
-
-        // Create the temporary variables
-        double b[Qa_dimension] = {0.0};
-
-        // Define B matrix
-        double B[6 * 3] = { /* Initialize with actual values */ };
-
-        // Compute b for the current Chebyshev point
-        for (int i = 0; i < Qa_dimension; ++i) {
-            for (int j = 0; j < lambda_dimension; ++j) {
-                b[i] -= Phi<na, ne>(Chebyshev_points[tid + 1]) * B[j * 3 + i] * t_Lambda_stack[index + j];
-            }
-        }
-
-        // Store b in B_NN
-        for (int i = 0; i < Qa_dimension; ++i) {
-            B_NN[tid * Qa_dimension + i] = b[i];
-        }
-    }
-}
-
 // CUDA kernel function to update Qad_vector_b
 __global__ void updateQad_vector_b_kernel(const double* t_Lambda_stack, double* B_NN) {
     // Get the global thread index
@@ -1369,26 +1337,57 @@ __global__ void updateQad_vector_b_kernel(const double* t_Lambda_stack, double* 
 }
 
 
-Eigen::MatrixXd updateQad_vector_b(Eigen::MatrixXd t_Lambda_stack)
-{
-    //  Define the Chebyshev points on the unit circle
-    const auto Chebyshev_points = ComputeChebyshevPoints<number_of_Chebyshev_points>();
+// Eigen::MatrixXd updateQad_vector_b(Eigen::MatrixXd t_Lambda_stack)
+// {
+//     //  Define the Chebyshev points on the unit circle
+//     const auto Chebyshev_points = ComputeChebyshevPoints<number_of_Chebyshev_points>();
 
-    Eigen::MatrixXd B_NN(number_of_Chebyshev_points-1, Qa_dimension);
+//     Eigen::MatrixXd B_NN(number_of_Chebyshev_points-1, Qa_dimension);
 
-    Eigen::VectorXd b(Qa_dimension);
+//     Eigen::VectorXd b(Qa_dimension);
 
-    Eigen::MatrixXd B(6, 3);
-    B.block(0, 0, 3, 3).setIdentity();
-    B.block(3, 0, 3, 3).setZero();
+//     Eigen::MatrixXd B(6, 3);
+//     B.block(0, 0, 3, 3).setIdentity();
+//     B.block(3, 0, 3, 3).setZero();
 
-    for (unsigned int i = 0; i < number_of_Chebyshev_points-1; ++i) {
+//     for (unsigned int i = 0; i < number_of_Chebyshev_points-1; ++i) {
 
-        // NOTE: Lambda_stack is already built without the first cheb. pt. however we need to index the Chebyshev_points[1] as our first cheb. pt (PORCA PUTTANA)
-        b =  -Phi<na,ne>(Chebyshev_points[i+1]).transpose()*B.transpose()*t_Lambda_stack.block<lambda_dimension,1>(lambda_dimension*i,0);
+//         // NOTE: Lambda_stack is already built without the first cheb. pt. however we need to index the Chebyshev_points[1] as our first cheb. pt (PORCA PUTTANA)
+//         b =  -Phi<na,ne>(Chebyshev_points[i+1]).transpose()*B.transpose()*t_Lambda_stack.block<lambda_dimension,1>(lambda_dimension*i,0);
 
-        B_NN.block<1,Qa_dimension>(i, 0) = b.transpose();
-    }
+//         B_NN.block<1,Qa_dimension>(i, 0) = b.transpose();
+//     }
+//     return B_NN;
+// }
+
+
+// Host function to update Qad_vector_b
+Eigen::MatrixXd updateQad_vector_b(Eigen::MatrixXd t_Lambda_stack) {
+    // Allocate device memory for t_Lambda_stack, and B_NN
+    double* d_t_Lambda_stack = nullptr;
+    double* d_B_NN = nullptr;
+    
+    cudaMalloc(&d_t_Lambda_stack, t_Lambda_stack.size() * size_of_double);
+    cudaMalloc(&d_B_NN, (number_of_Chebyshev_points - 1) * Qa_dimension * size_of_double);
+
+    // Copy t_Lambda_stack and Phi_stack from host to device
+    cudaMemcpy(d_t_Lambda_stack, t_Lambda_stack.data(), t_Lambda_stack.size() * size_of_double, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_Phi_stack, Phi_stack.data(), size_of_Phi_stack_in_bytes, cudaMemcpyHostToDevice);
+
+    // Launch the CUDA kernel
+    int threadsPerBlock = 256;
+    int blocksPerGrid = (number_of_Chebyshev_points - 1 + threadsPerBlock - 1) / threadsPerBlock;
+    updateQad_vector_b_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_t_Lambda_stack, d_B_NN);
+
+    // Copy B_NN from device to host
+    Eigen::MatrixXd B_NN(number_of_Chebyshev_points - 1, Qa_dimension);
+    cudaMemcpy(B_NN.data(), d_B_NN, (number_of_Chebyshev_points - 1) * Qa_dimension * size_of_double, cudaMemcpyDeviceToHost);
+
+    // Free device memory
+    cudaFree(d_t_Lambda_stack);
+    cudaFree(d_Phi_stack);
+    cudaFree(d_B_NN);
+
     return B_NN;
 }
 
