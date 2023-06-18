@@ -223,7 +223,7 @@ target_link_libraries(${PROJECT_NAME}_matSys_benchmark
 )
 # Add custom command to export benchmark results as CSV
 add_custom_command(TARGET ${PROJECT_NAME}_matSys_benchmark POST_BUILD
-    COMMAND ${PROJECT_NAME}_matInv_benchmark --benchmark_out_format=csv --benchmark_out="matInv_benchmark_result.csv"
+    COMMAND ${PROJECT_NAME}_matSys_benchmark --benchmark_out_format=csv --benchmark_out="matSys_benchmark_result.csv"
     # ${PROJECT_NAME}_matMul_benchmark --benchmark_format=csv
     COMMENT "Exporting benchmark results to result.csv"
 )

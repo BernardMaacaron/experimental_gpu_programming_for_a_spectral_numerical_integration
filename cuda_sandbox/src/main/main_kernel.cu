@@ -549,6 +549,7 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
     // Compute the memory occupation
     const auto size_of_Q_stack_CUDA_in_bytes = t_Q_stack_CUDA.size() * size_of_double;
     const auto size_of_b_in_bytes = b.size() * size_of_double;
+    const auto size_of_res_in_bytes = res.size() * size_of_double;
     const auto size_of_r_init_in_bytes = r_init.size() * size_of_double;
     const auto size_of_ivp_in_bytes = ivp.size() * size_of_double;
     const auto size_of_Dn_IN_F_in_bytes = Dn_IN_F.size() * size_of_double;
@@ -599,6 +600,7 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
     // Now the operation i have to perform is res = -d_ivp+d_b into the GPU
 
     // Dimensions
+    const int ld_b = b.rows();
     const int rows_ivp = ivp.rows();
     const int cols_ivp = ivp.cols();
     const int ld_ivp = rows_ivp;
@@ -636,7 +638,6 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
 
     // Compute the memory occupation
     const auto size_of_Dn_NN_inv_in_bytes = size_of_double * Dn_NN_inv.size();
-    const auto size_of_res_in_bytes = size_of_double * res.size();
     const auto size_of_r_stack_in_bytes = size_of_double * rows_r_stack * cols_r_stack;
 
     // Allocate the memory
@@ -662,8 +663,8 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
     Eigen::MatrixXd r_stack_CUDA(rows_r_stack, cols_r_stack);
 
     // Compute r_stack = Dn_NN_inv*res
-    double alpha_cublas = 1.0;
-    double beta_cublas = 0.0;
+    alpha_cublas = 1.0;
+    beta_cublas = 0.0;
     CUBLAS_CHECK(
         cublasDgemm(cublasH, CUBLAS_OP_N, CUBLAS_OP_N, rows_Dn_NN_inv, cols_res, cols_Dn_NN_inv, &alpha_cublas, d_Dn_NN_inv, ld_Dn_NN_inv, d_res, ld_res, &beta_cublas, d_r_stack, ld_r_stack)
     );

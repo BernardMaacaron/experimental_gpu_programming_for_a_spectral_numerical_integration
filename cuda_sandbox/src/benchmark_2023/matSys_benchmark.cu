@@ -46,11 +46,7 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
     };
 
     cusolverDnHandle_t cusolverH = NULL;
-    cublasHandle_t cublasH = NULL;
 
-    CUBLAS_CHECK(
-        cublasCreate(&cublasH)
-    );
 
     CUSOLVER_CHECK(
         cusolverDnCreate(&cusolverH)
@@ -80,12 +76,7 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
     double*  d_b = nullptr;
     double* d_work = nullptr;
     int* d_info = nullptr;
-
-    CUDA_CHECK(
-        cusolverDnDgetrf_bufferSize(cusolverH, rows_A, cols_A, d_A, ld_A, &lwork);
-    );
-
-    // Compute the memory occupation (I commented out the memory occupation for res in the following.)
+        // Compute the memory occupation (I commented out the memory occupation for res in the following.)
     const auto size_of_A_in_bytes = size_of_double * A.size();
     const auto size_of_b_in_bytes = size_of_double * b.size();
     
@@ -97,9 +88,6 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
     CUDA_CHECK(
         cudaMalloc(reinterpret_cast<void **>(&d_b), size_of_b_in_bytes)
     );
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_work), size_of_double * lwork)
-    );
 
         //  Copy the data: cudaMemcpy(destination, file_to_copy, size_of_the_file, std_cmd)
     CUDA_CHECK(
@@ -109,6 +97,15 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
         cudaMemcpy(d_b, b.data(), size_of_b_in_bytes, cudaMemcpyHostToDevice)
     );
     
+
+    CUSOLVER_CHECK(
+        cusolverDnDgetrf_bufferSize(cusolverH, rows_A, cols_A, d_A, ld_A, &lwork)
+    );
+    CUDA_CHECK(
+        cudaMalloc(reinterpret_cast<void **>(&d_work), size_of_double * lwork)
+    );
+
+
 
     for (auto _ : t_state) {
         auto start = std::chrono::high_resolution_clock::now();
@@ -135,9 +132,6 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
     );
     CUDA_CHECK(
         cudaFree(d_b)
-    );
-    CUBLAS_CHECK(
-        cublasDestroy(cublasH)
     );
     CUSOLVER_CHECK(
         cusolverDnDestroy(cusolverH)
