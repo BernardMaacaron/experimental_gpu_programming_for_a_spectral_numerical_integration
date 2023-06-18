@@ -1044,8 +1044,6 @@ __global__ void updateCouplesbKernel(const double* t_N_stack_CUDA, double* d_bet
         const Eigen::Vector3d C_bar = Eigen::Vector3d::Zero();
         Eigen::Vector3d N;
 
-        int offset = idx * lambda_dimension / 2;
-
         for (int i = 0; i < lambda_dimension / 2; ++i) {
             N(i) = t_N_stack_CUDA[offset + i];
         }
@@ -1310,6 +1308,67 @@ Eigen::MatrixXd buildLambda(Eigen::MatrixXd t_C_stack_CUDA, Eigen::MatrixXd t_N_
 
 
 // Used to build Qa_stack
+
+// CUDA kernel function to update Qad_vector_b
+__global__ void updateQad_vector_b_kernel(const double* t_Lambda_stack, double* B_NN) {
+
+    // Get the global thread index
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (tid < number_of_Chebyshev_points - 1) {
+        // Compute the starting index for the current Chebyshev point
+        int index = lambda_dimension * tid;
+
+        // Create the temporary variables
+        double b[Qa_dimension] = {0.0};
+
+        // Define B matrix
+        double B[6 * 3] = { /* Initialize with actual values */ };
+
+        // Compute b for the current Chebyshev point
+        for (int i = 0; i < Qa_dimension; ++i) {
+            for (int j = 0; j < lambda_dimension; ++j) {
+                b[i] -= Phi<na, ne>(Chebyshev_points[tid + 1]) * B[j * 3 + i] * t_Lambda_stack[index + j];
+            }
+        }
+
+        // Store b in B_NN
+        for (int i = 0; i < Qa_dimension; ++i) {
+            B_NN[tid * Qa_dimension + i] = b[i];
+        }
+    }
+}
+
+// CUDA kernel function to update Qad_vector_b
+__global__ void updateQad_vector_b_kernel(const double* t_Lambda_stack, double* B_NN) {
+    // Get the global thread index
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (tid < number_of_Chebyshev_points - 1) {
+        // Compute the starting index for the current Chebyshev point
+        int index = lambda_dimension * tid;
+
+        // Create the temporary variables
+        double b[Qa_dimension] = {0.0};
+
+        // Define B matrix
+        double B[6 * 3] = { /* Initialize with actual values */ };
+
+        // Compute b for the current Chebyshev point
+        for (int i = 0; i < Qa_dimension; ++i) {
+            for (int j = 0; j < lambda_dimension; ++j) {
+                b[i] -= Phi_stack[(tid + 1) * lambda_dimension + j] * B[j * 3 + i] * t_Lambda_stack[index + j];
+            }
+        }
+
+        // Store b in B_NN
+        for (int i = 0; i < Qa_dimension; ++i) {
+            B_NN[tid * Qa_dimension + i] = b[i];
+        }
+    }
+}
+
+
 Eigen::MatrixXd updateQad_vector_b(Eigen::MatrixXd t_Lambda_stack)
 {
     //  Define the Chebyshev points on the unit circle
