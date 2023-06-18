@@ -1063,13 +1063,13 @@ __global__ void updateCouplesbKernel(const double* t_N_stack_CUDA, double* d_bet
         const int cols_C_bar = C_bar.cols();
         const int ld_C_bar = rows_N;
 
-        const int ld_beta = (lambda_dimension/2)*(number_of_Chebyshev_points-1);
+        // const int ld_b = ld_C_bar;
         
         // Create Pointers
         double* d_skewGamma = nullptr;
         double* d_N = nullptr;
         double* d_C_bar = nullptr;
-        double* d_beta = nullptr;
+        double* d_beta = nullptr; 
 
         // Compute the memory occupation
         const auto size_of_skewGamma_in_bytes = size_of_double * rows_skewGamma*cols_skewGamma;
@@ -1086,12 +1086,18 @@ __global__ void updateCouplesbKernel(const double* t_N_stack_CUDA, double* d_bet
         CUDA_CHECK(cudaMemcpy(d_N, N.data(), size_of_N_in_bytes, cudaMemcpyHostToDevice));
         CUDA_CHECK(cudaMemcpy(d_C_bar, C_bar.data(), size_of_C_bar_in_bytes, cudaMemcpyHostToDevice));
 
-        // Perform b = skewGamma.transpose() * N - C_bar
+        // Perform C_bar = skewGamma.transpose() * N - C_bar
         const double alpha_cublas = 1.0;
         const double beta_cublas = -1.0;
         CUBLAS_CHECK(cublasDgemm(cublasH, CUBLAS_OP_T, CUBLAS_OP_N, rows_skewGamma, cols_N, cols_skewGamma, &alpha_cublas, d_skewGamma, ld_skewGamma, d_N, ld_N, &beta_cublas, d_beta, ld_beta));
+        // The result of cublasDgemm is stored in C_bar
+        
+        Eigen::Map<Eigen::VectorXd> b(, (number_of_Chebyshev_points - 1) * 3);
 
-        CUDA_CHECK(cudaMemcpy(beta + offset, d_beta, 3 * sizeof(double), cudaMemcpyDeviceToHost)); // I hope this works
+        for (int i = 0; i < lambda_dimension / 2; ++i) {
+            beta[offset + i] = b(i);
+        }
+
 
         cudaFree(d_skewGamma);
         cudaFree(d_N);
