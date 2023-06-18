@@ -526,12 +526,11 @@ __global__ void updatePositionbKernel(const double* t_Q_stack_CUDA, double* t_b)
 //     return ivp;
 // }
 
-__global__ void computeIvpKernel(const double* t_Dn_IN_F_data, const double* t_r_init_data, double* ivp_data) {
+__global__ void computeIvpKernel(const double* t_Dn_IN_F_data, const double* t_r_init_data, double* t_ivp) {
     int i = threadIdx.x;
 
     Eigen::Map<const Eigen::MatrixXd> t_Dn_IN_F(t_Dn_IN_F_data, number_of_Chebyshev_points-1, 1); // the 1 at the end is because we only need one (the first) col of Dn_IN_F
     Eigen::Map<const Eigen::Vector3d> t_r_init(t_r_init_data);
-    Eigen::Map<Eigen::MatrixXd> ivp(ivp_data, number_of_Chebyshev_points-1, position_dimension);
 
     if (i < number_of_Chebyshev_points-1) {
         ivp.row(i) = t_Dn_IN_F(i, 0) * t_r_init.transpose();
@@ -986,9 +985,7 @@ Eigen::MatrixXd integrateInternalForces(Eigen::MatrixXd t_Q_stack_CUDA)
     // res = -D_IN*N_init + beta
     double alpha_cublas = -1.0;
     double beta_cublas = 1.0;
-    CUBLAS_CHECK(
-        cublasDgemm(cublasH, CUBLAS_OP_N, CUBLAS_OP_N, rows_D_IN, cols_N_init, cols_D_IN, &alpha_cublas, d_D_IN, ld_D_IN, d_N_init, ld_N_init, &beta_cublas, d_beta, ld_beta)
-    );
+    CUBLAS_CHECK(cublasDgemm(cublasH, CUBLAS_OP_N, CUBLAS_OP_N, rows_D_IN, cols_N_init, cols_D_IN, &alpha_cublas, d_D_IN, ld_D_IN, d_N_init, ld_N_init, &beta_cublas, d_beta, ld_beta));
 
     // LU factorization
     CUSOLVER_CHECK(
@@ -1044,6 +1041,8 @@ __global__ void updateCouplesbKernel(const double* t_N_stack_CUDA, double* d_bet
         const Eigen::Vector3d C_bar = Eigen::Vector3d::Zero();
         Eigen::Vector3d N;
 
+        int offset = idx * lambda_dimension / 2;
+
         for (int i = 0; i < lambda_dimension / 2; ++i) {
             N(i) = t_N_stack_CUDA[offset + i];
         }
@@ -1067,7 +1066,6 @@ __global__ void updateCouplesbKernel(const double* t_N_stack_CUDA, double* d_bet
         double* d_skewGamma = nullptr;
         double* d_N = nullptr;
         double* d_C_bar = nullptr;
-        double* d_beta = nullptr; 
 
         // Compute the memory occupation
         const auto size_of_skewGamma_in_bytes = size_of_double * rows_skewGamma*cols_skewGamma;
@@ -1087,19 +1085,15 @@ __global__ void updateCouplesbKernel(const double* t_N_stack_CUDA, double* d_bet
         // Perform C_bar = skewGamma.transpose() * N - C_bar
         const double alpha_cublas = 1.0;
         const double beta_cublas = -1.0;
-        CUBLAS_CHECK(cublasDgemm(cublasH, CUBLAS_OP_T, CUBLAS_OP_N, rows_skewGamma, cols_N, cols_skewGamma, &alpha_cublas, d_skewGamma, ld_skewGamma, d_N, ld_N, &beta_cublas, d_beta, ld_beta));
-        // The result of cublasDgemm is stored in C_bar
-        
-        Eigen::Map<Eigen::VectorXd> b(, (number_of_Chebyshev_points - 1) * 3);
+        CUBLAS_CHECK(cublasDgemm(cublasH, CUBLAS_OP_T, CUBLAS_OP_N, rows_skewGamma, cols_N, cols_skewGamma, &alpha_cublas, d_skewGamma, ld_skewGamma, d_N, ld_N, &beta_cublas, d_C_bar, ld_C_bar));
+        // before was completly wrong. The result of cublasDgemm is stored into C_bar so beta is a stuck of C_bar
 
         for (int i = 0; i < lambda_dimension / 2; ++i) {
-            beta[offset + i] = b(i);
+            d_beta[offset + i] = d_C_bar[i];
         }
-
 
         cudaFree(d_skewGamma);
         cudaFree(d_N);
-        cudaFree(d_beta);
     }
 }
 
@@ -1308,67 +1302,6 @@ Eigen::MatrixXd buildLambda(Eigen::MatrixXd t_C_stack_CUDA, Eigen::MatrixXd t_N_
 
 
 // Used to build Qa_stack
-
-// CUDA kernel function to update Qad_vector_b
-__global__ void updateQad_vector_b_kernel(const double* t_Lambda_stack, double* B_NN) {
-
-    // Get the global thread index
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (tid < number_of_Chebyshev_points - 1) {
-        // Compute the starting index for the current Chebyshev point
-        int index = lambda_dimension * tid;
-
-        // Create the temporary variables
-        double b[Qa_dimension] = {0.0};
-
-        // Define B matrix
-        double B[6 * 3] = { /* Initialize with actual values */ };
-
-        // Compute b for the current Chebyshev point
-        for (int i = 0; i < Qa_dimension; ++i) {
-            for (int j = 0; j < lambda_dimension; ++j) {
-                b[i] -= Phi<na, ne>(Chebyshev_points[tid + 1]) * B[j * 3 + i] * t_Lambda_stack[index + j];
-            }
-        }
-
-        // Store b in B_NN
-        for (int i = 0; i < Qa_dimension; ++i) {
-            B_NN[tid * Qa_dimension + i] = b[i];
-        }
-    }
-}
-
-// CUDA kernel function to update Qad_vector_b
-__global__ void updateQad_vector_b_kernel(const double* t_Lambda_stack, double* B_NN) {
-    // Get the global thread index
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (tid < number_of_Chebyshev_points - 1) {
-        // Compute the starting index for the current Chebyshev point
-        int index = lambda_dimension * tid;
-
-        // Create the temporary variables
-        double b[Qa_dimension] = {0.0};
-
-        // Define B matrix
-        double B[6 * 3] = { /* Initialize with actual values */ };
-
-        // Compute b for the current Chebyshev point
-        for (int i = 0; i < Qa_dimension; ++i) {
-            for (int j = 0; j < lambda_dimension; ++j) {
-                b[i] -= Phi_stack[(tid + 1) * lambda_dimension + j] * B[j * 3 + i] * t_Lambda_stack[index + j];
-            }
-        }
-
-        // Store b in B_NN
-        for (int i = 0; i < Qa_dimension; ++i) {
-            B_NN[tid * Qa_dimension + i] = b[i];
-        }
-    }
-}
-
-
 Eigen::MatrixXd updateQad_vector_b(Eigen::MatrixXd t_Lambda_stack)
 {
     //  Define the Chebyshev points on the unit circle
