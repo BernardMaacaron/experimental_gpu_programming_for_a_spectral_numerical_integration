@@ -47,11 +47,6 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
 
     cusolverDnHandle_t cusolverH = NULL;
 
-<<<<<<< HEAD
-=======
-    CUBLAS_CHECK(cublasCreate(&cublasH));
->>>>>>> Benchmarking_2023
-
     CUSOLVER_CHECK(cusolverDnCreate(&cusolverH));
 
     Eigen::MatrixXd A = Eigen::MatrixXd::Random(dim, dim);
@@ -77,35 +72,15 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
     double*  d_b = nullptr;
     double* d_work = nullptr;
     int* d_info = nullptr;
-<<<<<<< HEAD
-        // Compute the memory occupation (I commented out the memory occupation for res in the following.)
-=======
 
     // Compute the memory occupation (I commented out the memory occupation for res in the following.)
->>>>>>> Benchmarking_2023
     const auto size_of_A_in_bytes = size_of_double * A.size();
     const auto size_of_b_in_bytes = size_of_double * b.size();
 
     // Compute memory for LU factorization workspace
-    CUDA_CHECK(cusolverDnDgetrf_bufferSize(cusolverH, rows_A, cols_A, d_A, ld_A, &lwork));
+    CUSOLVER_CHECK(cusolverDnDgetrf_bufferSize(cusolverH, rows_A, cols_A, d_A, ld_A, &lwork));
 
     // Allocate the memory
-<<<<<<< HEAD
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_A), size_of_A_in_bytes)
-    );
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_b), size_of_b_in_bytes)
-    );
-
-        //  Copy the data: cudaMemcpy(destination, file_to_copy, size_of_the_file, std_cmd)
-    CUDA_CHECK(
-        cudaMemcpy(d_A, A.data(), size_of_A_in_bytes, cudaMemcpyHostToDevice)
-    );
-    CUDA_CHECK(
-        cudaMemcpy(d_b, b.data(), size_of_b_in_bytes, cudaMemcpyHostToDevice)
-    );
-=======
     CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_A), size_of_A_in_bytes));
     CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_b), size_of_b_in_bytes));
     CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_work), size_of_double * lwork));
@@ -113,7 +88,6 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
     //  Copy the data: cudaMemcpy(destination, file_to_copy, size_of_the_file, std_cmd)
     CUDA_CHECK(cudaMemcpy(d_A, A.data(), size_of_A_in_bytes, cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_b, b.data(), size_of_b_in_bytes, cudaMemcpyHostToDevice));
->>>>>>> Benchmarking_2023
     
 
     CUSOLVER_CHECK(
@@ -141,27 +115,11 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
 
     //exportBenchmarkResultsToCSV(benchmark2_name + ".csv", t_state.name(), t_state.iterations(), t_state.real_time(), t_state.cpu_time());
    
-<<<<<<< HEAD
-    CUDA_CHECK(
-        cudaFree(d_A)
-    );
-    CUDA_CHECK(
-        cudaFree(d_b)
-    );
-    CUSOLVER_CHECK(
-        cusolverDnDestroy(cusolverH)
-    );
-    CUDA_CHECK(
-        cudaDeviceReset()
-    );
-=======
     CUDA_CHECK(cudaFree(d_A));
     CUDA_CHECK(cudaFree(d_b));
 
-    CUBLAS_CHECK(cublasDestroy(cublasH));
     CUSOLVER_CHECK(cusolverDnDestroy(cusolverH));
     CUDA_CHECK(cudaDeviceReset());
->>>>>>> Benchmarking_2023
 };
 
 
