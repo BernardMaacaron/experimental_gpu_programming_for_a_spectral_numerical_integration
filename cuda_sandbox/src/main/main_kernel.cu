@@ -494,27 +494,6 @@ __device__ void quaternionToRotationMatrix(const double* q, double* R) {
     R[8] = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3;
 }
 
-__global__ void updatePositionbKernel(double* t_Q_stack_CUDA, double* t_b){
-    
-    int i = threadIdx.x;
-
-    Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> b(t_b, number_of_Chebyshev_points-1, position_dimension);
-
-    if (i < number_of_Chebyshev_points-1) {
-        double q[4] = { t_Q_stack_CUDA[i], 
-                        t_Q_stack_CUDA[i + (number_of_Chebyshev_points-1)],
-                        t_Q_stack_CUDA[i + 2*(number_of_Chebyshev_points-1)], 
-                        t_Q_stack_CUDA[i + 3*(number_of_Chebyshev_points-1)]
-                        };
-
-        double R[9];
-
-        quaternionToRotationMatrix(q, R);
-
-        b.block<1, 3>(i, 0) = (Eigen::Map<Eigen::MatrixXd>(R, 3, 3) * Eigen::Vector3d(1, 0, 0)).transpose();
-    }
-}
-
 __global__ void computeIvpKernel(double* t_Dn_IN_F, double* t_r_init, double* t_ivp) {
     int i = threadIdx.x;
 
@@ -524,6 +503,31 @@ __global__ void computeIvpKernel(double* t_Dn_IN_F, double* t_r_init, double* t_
         t_ivp[i+2] = t_Dn_IN_F[i] * t_r_init[2];
     }
 }
+
+__global__ void updatePositionbKernel(double* d_Q_stack_CUDA, double* d_b, double* d_ivp){
+    
+    int i = threadIdx.x;
+
+    if (i < number_of_Chebyshev_points-1) {
+        double q[4] = { d_Q_stack_CUDA[i], 
+                        d_Q_stack_CUDA[i + (number_of_Chebyshev_points-1)],
+                        d_Q_stack_CUDA[i + 2*(number_of_Chebyshev_points-1)], 
+                        d_Q_stack_CUDA[i + 3*(number_of_Chebyshev_points-1)]
+                        };
+
+        double R[9];
+
+        quaternionToRotationMatrix(q, R);
+
+        // b.block<1, 3>(i, 0) = (Eigen::Map<Eigen::MatrixXd>(R, 3, 3) * Eigen::Vector3d(1, 0, 0)).transpose();
+        d_b[0+i*position_dimension] = R[0] - d_ivp[0+i*position_dimension];
+        d_b[1+i*position_dimension] = R[3] - d_ivp[1+i*position_dimension];
+        d_b[2+i*position_dimension] = R[6] - d_ivp[2+i*position_dimension];
+
+    }
+}
+
+
 
 Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
 {   
@@ -584,29 +588,12 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
         cudaMemcpy(d_Dn_IN_F, Dn_IN_F.data(), size_of_Dn_IN_F_in_bytes, cudaMemcpyHostToDevice)
     );
 
-    // Launch the kernel for b: the result of the kernel is stored into d_b
-    updatePositionbKernel<<<1, number_of_Chebyshev_points-1>>>(d_Q_stack_CUDA, d_b);
-    
     // Launch the kernel for ivp: the result of the kernel is stored into d_b
     computeIvpKernel<<<1, number_of_Chebyshev_points-1>>>(d_Dn_IN_F, d_r_init, d_ivp);
 
-    // Before we had b_NN = updatePositionb and thn res = B_NN -ivp so we have to do the same somehow 
+    // Launch the kernel for b: the result of the kernel is stored into d_b
+    updatePositionbKernel<<<1, number_of_Chebyshev_points-1>>>(d_Q_stack_CUDA, d_b, d_ivp);
 
-    // Now the operation i have to perform is res = -d_ivp+d_b into the GPU
-
-    // Dimensions
-    const int ld_b = b.rows();
-    const int rows_ivp = ivp.rows();
-    const int cols_ivp = ivp.cols();
-    const int ld_ivp = rows_ivp;
-
-    // Computing b = -ivp + b       
-    double alpha_cublas = -1.0;
-    double beta_cublas = 1.0;
-
-    CUBLAS_CHECK(
-        cublasDgemm(cublasH, CUBLAS_OP_N, CUBLAS_OP_N, rows_ivp, cols_ivp, cols_ivp, &alpha_cublas, d_ivp, ld_ivp, nullptr, ld_ivp, &beta_cublas, d_b, ld_b)
-    );
 
     // This passage is for sure not necessary but right now it's the fastes thing. If everything work we will fix it.
     CUDA_CHECK(
@@ -658,8 +645,8 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
     Eigen::MatrixXd r_stack_CUDA(rows_r_stack, cols_r_stack);
 
     // Compute r_stack = Dn_NN_inv*res
-    alpha_cublas = 1.0;
-    beta_cublas = 0.0;
+    double alpha_cublas = 1.0;
+    double beta_cublas = 0.0;
     CUBLAS_CHECK(
         cublasDgemm(cublasH, CUBLAS_OP_N, CUBLAS_OP_N, rows_Dn_NN_inv, cols_res, cols_Dn_NN_inv, &alpha_cublas, d_Dn_NN_inv, ld_Dn_NN_inv, d_res, ld_res, &beta_cublas, d_r_stack, ld_r_stack)
     );
@@ -781,31 +768,6 @@ int i = threadIdx.x;
                             R[7]*Fg,
                             R[8]*Fg
         };
-
-        // Compute the memory occupation
-        const auto size_of_R_in_bytes = 9 * size_of_double;
-        const auto size_of_Fg_in_bytes = 3 * size_of_double;
-        const auto size_of_Nbar_in_bytes = 3 * size_of_double;
-
-        // Create Pointers
-        double* d_R = nullptr;
-        double* d_Fg = nullptr;
-        double* d_Nbar = nullptr;
-
-        // Memory allocation
-        CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_R), size_of_R_in_bytes));
-        CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_Fg), size_of_Fg_in_bytes));
-        CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_Nbar), size_of_Nbar_in_bytes));
-
-        CUDA_CHECK(cudaMemcpy(d_R, R.data(), size_of_R_in_bytes, cudaMemcpyHostToDevice));
-        CUDA_CHECK(cudaMemcpy(d_Fg, Fg, size_of_Fg_in_bytes, cudaMemcpyHostToDevice));
-
-        // cublasDgemm to perform Nbar = R.transpose()*Fg
-        double alpha_cublas = 1.0;
-        double beta_cublas = 0.0;
-        CUBLAS_CHECK(cublasDgemm(cublasH, CUBLAS_OP_T, CUBLAS_OP_N, 3, 1, 3, &alpha_cublas, d_R, 3, d_Fg, 1, &beta_cublas, d_Nbar, 1));
-
-        CUDA_CHECK(cudaMemcpy(Nbar, d_Nbar, 3 * size_of_double, cudaMemcpyDeviceToHost));
 
         Nbar_stack(i) = Nbar[0];
         Nbar_stack(i + (number_of_Chebyshev_points - 1)) = Nbar[1];
@@ -984,35 +946,6 @@ __global__ void updateCouplesbKernel(const double* t_N_stack_CUDA, double* d_bet
 
     const Eigen::Vector3d C_bar = Eigen::Vector3d::Zero();
     Eigen::Vector3d N;
-    // Dimensions definition
-    const int rows_skewGamma = 3;
-    const int cols_skewGamma = 3;        
-    const int ld_skewGamma = 3;
-
-    const int rows_N = N.rows();
-    const int cols_N = N.cols();
-    const int ld_N = rows_N;
-
-    const int rows_C_bar = C_bar.rows();
-    const int cols_C_bar = C_bar.cols();
-    const int ld_C_bar = rows_N;
-
-    const int ld_beta = ld_C_bar;
-    
-    // Create Pointers
-    double* d_skewGamma = nullptr;
-    double* d_N = nullptr;
-    double* d_C_bar = nullptr;
-
-    // Compute the memory occupation
-    const auto size_of_skewGamma_in_bytes = size_of_double * rows_skewGamma*cols_skewGamma;
-    const auto size_of_N_in_bytes = size_of_double * N.size();
-    const auto size_of_C_bar_in_bytes = size_of_double * C_bar.size();
-
-    // Allocate the memory
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_skewGamma), size_of_skewGamma_in_bytes));
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_N), size_of_N_in_bytes));
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_C_bar), size_of_C_bar_in_bytes));
 
     if (idx < number_of_Chebyshev_points - 1) {
         Eigen::VectorXd Gamma(lambda_dimension / 2);
@@ -1024,8 +957,6 @@ __global__ void updateCouplesbKernel(const double* t_N_stack_CUDA, double* d_bet
                      Gamma(2), 0, -Gamma(0),
                     -Gamma(1), Gamma(0), 0;
 
-
-
         int offset = idx * lambda_dimension / 2;
 
         for (int i = 0; i < lambda_dimension / 2; ++i) {
@@ -1033,29 +964,15 @@ __global__ void updateCouplesbKernel(const double* t_N_stack_CUDA, double* d_bet
         }
 
         // Perform b = skewGamma.transpose() * N - C_bar
-        double b[3] = { skewGamma[2]*N(1)-skewGamma[1]*N(2)-C_bar[0],
-                            -skewGamma[2]*N(0)+skewGamma[0]*N(2)-C_bar[1],
-                            skewGamma[1]*N(0)-skewGamma[0]*N(1)-C_bar[2]
-                    };
+        double b[3] = { skewGamma(2)*N(1)-skewGamma(1)*N(2)-C_bar(0),
+                            -skewGamma(2)*N(0)+skewGamma(0)*N(2)-C_bar(1),
+                            skewGamma(1)*N(0)-skewGamma(0)*N(1)-C_bar(2)};
 
-        //  Copy the data: cudaMemcpy(destination, file_to_copy, size_of_the_file, std_cmd)
-        CUDA_CHECK(cudaMemcpy(d_skewGamma, skewGamma.data(), size_of_skewGamma_in_bytes, cudaMemcpyHostToDevice));
-        CUDA_CHECK(cudaMemcpy(d_N, N.data(), size_of_N_in_bytes, cudaMemcpyHostToDevice));
-        CUDA_CHECK(cudaMemcpy(d_C_bar, C_bar.data(), size_of_C_bar_in_bytes, cudaMemcpyHostToDevice));
-
-        // Perform C_bar = skewGamma.transpose() * N - C_bar
-        const double alpha_cublas = 1.0;
-        const double beta_cublas = -1.0;
-        CUBLAS_CHECK(cublasDgemm(cublasH, CUBLAS_OP_T, CUBLAS_OP_N, rows_skewGamma, cols_N, cols_skewGamma, &alpha_cublas, d_skewGamma, ld_skewGamma, d_N, ld_N, &beta_cublas, d_C_bar, ld_C_bar));
-        // before was completly wrong. The result of cublasDgemm is stored into C_bar so beta is a stuck of C_bar
 
         for (int i = 0; i < lambda_dimension / 2; ++i) {
             d_beta[offset + i] = b[i];
         }
     }
-    // Free kernel memory
-    CUDA_CHECK(cudaFree(d_skewGamma));
-    CUDA_CHECK(cudaFree(d_N));
 }
 
 Eigen::MatrixXd integrateInternalCouples(Eigen::MatrixXd t_N_stack_CUDA)
@@ -1261,34 +1178,30 @@ Eigen::MatrixXd buildLambda(Eigen::MatrixXd t_C_stack_CUDA, Eigen::MatrixXd t_N_
 
 // Used to build Qa_stack
 // CUDA kernel function to update Qad_vector_b
-__global__ void updateQad_vector_bKernel(double* d_Lambda_stack, double* B_NN) {
+__global__ void updateQad_vector_bKernel(double* d_Lambda_stack, double* B_NN, double* d_Phi_stack, int Qa_dimension) {
     int tid = threadIdx.x;
-
-    // Define the Chebyshev points on the unit circle
-    // ComputeChebyshevPoints function implementation here...
-
 
     if (tid < number_of_Chebyshev_points - 1) {
         // Create Eigen objects for B_NN and b
         Eigen::Map<Eigen::MatrixXd> B_NN_mat(B_NN, number_of_Chebyshev_points - 1, Qa_dimension);
         Eigen::VectorXd b(Qa_dimension);
+
+        // // Create Eigen object for B
+        // Eigen::Matrix<double, 6, 3> B;
+        // B.block(0, 0, 3, 3).setIdentity();
+        // B.block(3, 0, 3, 3).setZero();
+
+        // The B mtrix is not used here because it contains only ones and zeros and it has been already taken into account
+        b(0) = d_Phi_stack[0+tid]*d_Lambda_stack[0+tid] + d_Phi_stack[6+tid]*d_Lambda_stack[1+tid] + d_Phi_stack[12+tid]*d_Lambda_stack[2+tid];
+        b(1) = d_Phi_stack[1+tid]*d_Lambda_stack[0+tid] + d_Phi_stack[7+tid]*d_Lambda_stack[1+tid] + d_Phi_stack[13+tid]*d_Lambda_stack[2+tid];
+        b(2) = d_Phi_stack[2+tid]*d_Lambda_stack[0+tid] + d_Phi_stack[8+tid]*d_Lambda_stack[1+tid] + d_Phi_stack[14+tid]*d_Lambda_stack[2+tid];
+        b(3) = d_Phi_stack[3+tid]*d_Lambda_stack[0+tid] + d_Phi_stack[9+tid]*d_Lambda_stack[1+tid] + d_Phi_stack[15+tid]*d_Lambda_stack[2+tid];
+        b(4) = d_Phi_stack[4+tid]*d_Lambda_stack[0+tid] + d_Phi_stack[10+tid]*d_Lambda_stack[1+tid] + d_Phi_stack[16+tid]*d_Lambda_stack[2+tid];
+        b(5) = d_Phi_stack[5+tid]*d_Lambda_stack[0+tid] + d_Phi_stack[11+tid]*d_Lambda_stack[1+tid] + d_Phi_stack[17+tid]*d_Lambda_stack[2+tid];
         
+        // Set the computed b in the B_NN matrix
+        B_NN_mat.row(tid) = b.transpose();
 
-        // Create Eigen object for B
-        Eigen::Matrix<double, 6, 3> B;
-        B.block(0, 0, 3, 3).setIdentity();
-        B.block(3, 0, 3, 3).setZero();
-
-        // Compute b for the current Chebyshev point
-        for (int i = 0; i < lambda_dimension; ++i) {
-            double* lambdaPtr = d_Lambda_stack + lambda_dimension * tid;
-            Eigen::Map<Eigen::VectorXd> t_Lambda(lambdaPtr, lambda_dimension);
-
-            b = -Phi_stack.block<na, na*ne>((tid+1)*(number_of_Chebyshev_points-1),0).transpose() * B.transpose() * t_Lambda;
-
-            // Set the computed b in the B_NN matrix
-            B_NN_mat.row(tid) = b.transpose();
-        }
     }
 }
 
@@ -1321,7 +1234,7 @@ Eigen::MatrixXd integrateGeneralisedForces(Eigen::MatrixXd t_Lambda_stack)
     CUDA_CHECK(cudaMemcpy(d_Lambda_stack, t_Lambda_stack.data(), size_of_Lambda_stack_in_bytes, cudaMemcpyHostToDevice));
 
     // Launch kernel with one block
-    updateQad_vector_bKernel<<<1, number_of_Chebyshev_points-1>>>(d_Lambda_stack, d_B_NN);
+    updateQad_vector_bKernel<<<1, number_of_Chebyshev_points-1>>>(d_Lambda_stack, d_B_NN, d_Phi_stack, Qa_dimension);
 
         // Free kernel memory
     CUDA_CHECK(cudaFree(d_Lambda_stack));
@@ -1421,27 +1334,25 @@ int main(int argc, char *argv[])
     const auto Q_stack_CUDA = integrateQuaternions();
     std::cout << "Quaternion Integration : \n" << Q_stack_CUDA << std::endl;
     
-    // const auto r_stack_CUDA = integratePosition(Q_stack_CUDA);
-    // std::cout << "Position Integration : \n" << r_stack_CUDA << std::endl;
+    const auto r_stack_CUDA = integratePosition(Q_stack_CUDA);
+    std::cout << "Position Integration : \n" << r_stack_CUDA << std::endl;
 
-    // const auto N_stack_CUDA = integrateInternalForces(Q_stack_CUDA);
-    // std::cout << "Internal Forces Integration : \n" << N_stack_CUDA << "\n" << std::endl;
+    const auto N_stack_CUDA = integrateInternalForces(Q_stack_CUDA);
+    std::cout << "Internal Forces Integration : \n" << N_stack_CUDA << "\n" << std::endl;
 
-    // const auto C_stack_CUDA = integrateInternalCouples(N_stack_CUDA);
-    // std::cout << "Internal Couples Integration : \n" << C_stack_CUDA << "\n" << std::endl;
+    const auto C_stack_CUDA = integrateInternalCouples(N_stack_CUDA);
+    std::cout << "Internal Couples Integration : \n" << C_stack_CUDA << "\n" << std::endl;
 
     // std::cout << "Internal Forces MATRIX : \n" << toMatrix(N_stack_CUDA, number_of_Chebyshev_points) << "\n" << std::endl;
     // std::cout << "Internal Couples MATRIX : \n" << toMatrix(C_stack_CUDA, number_of_Chebyshev_points) << "\n" << std::endl;
     
-    // const auto Lambda_stack_CUDA = buildLambda(C_stack_CUDA, N_stack_CUDA);
-    // //std::cout << "Lambda_stack : \n" << Lambda_stack_CUDA << "\n" << std::endl;
+    const auto Lambda_stack_CUDA = buildLambda(C_stack_CUDA, N_stack_CUDA);
+    //std::cout << "Lambda_stack : \n" << Lambda_stack_CUDA << "\n" << std::endl;
 
-    // const auto Qa_stack_CUDA = integrateGeneralisedForces(Lambda_stack_CUDA);
-    // std::cout << "Generalized Forces Integration : \n" << Qa_stack_CUDA << std::endl;
+    const auto Qa_stack_CUDA = integrateGeneralisedForces(Lambda_stack_CUDA);
+    std::cout << "Generalized Forces Integration : \n" << Qa_stack_CUDA << std::endl;
 
-    /*
-    Destry cuda objects
-    */
+    // Destroy the handle
     CUBLAS_CHECK(
         cublasDestroy(cublasH)
     );
