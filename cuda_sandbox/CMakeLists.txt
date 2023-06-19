@@ -276,3 +276,31 @@ add_custom_command(TARGET ${PROJECT_NAME}_main_benchmark_GPU POST_BUILD
     # ${PROJECT_NAME}_matMul_benchmark --benchmark_format=csv
     COMMENT "Exporting benchmark results to result.csv"
 )
+
+#MAIN BENCHMARK GPU Kernel Executable
+add_executable(${PROJECT_NAME}_main_benchmark_kernel
+        src/benchmark_2023/main_benchmark_kernel.cu
+        include/chebyshev_differentiation.h
+        include/utilities.h
+        include/spectral_integration_utilities.h
+        include/lie_algebra_utilities.h
+        include/globals.h
+        include/getCusolverErrorString.h
+)
+target_include_directories(${PROJECT_NAME}_main_benchmark_kernel 
+    PUBLIC
+        ${CUDA_INCLUDE_DIRS}
+)
+target_link_libraries(${PROJECT_NAME}_main_benchmark_kernel
+    PUBLIC
+        cusolver
+        cublas
+        Eigen3::Eigen
+        benchmark::benchmark
+        )
+# Add custom command to export benchmark results as CSV
+add_custom_command(TARGET ${PROJECT_NAME}_main_benchmark_kernel POST_BUILD
+    COMMAND ${PROJECT_NAME}_main_benchmark_kernel --benchmark_out_format=csv --benchmark_out="main_benchmark_kernel_result.csv"
+    # ${PROJECT_NAME}_matMul_benchmark --benchmark_format=csv
+    COMMENT "Exporting benchmark results to result.csv"
+)
