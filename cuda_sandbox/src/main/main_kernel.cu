@@ -903,7 +903,9 @@ Eigen::MatrixXd integrateInternalForces(Eigen::MatrixXd t_Q_stack_CUDA)
 
     // res = -D_IN*N_init + beta
     double alpha_cublas = -1.0;
-    double beta_cublas = 1.0;
+    
+    // IMPORTANT: Normal equation is +beta but since beta is holding Nbar_stack and not -Nbar_stack, we need to change the sign of beta_cublas to compensate
+    double beta_cublas = -1.0;
     CUBLAS_CHECK(cublasDgemm(cublasH, CUBLAS_OP_N, CUBLAS_OP_N, rows_D_IN, cols_N_init, cols_D_IN, &alpha_cublas, d_D_IN, ld_D_IN, d_N_init, ld_N_init, &beta_cublas, d_beta, ld_beta));
 
     // LU factorization
