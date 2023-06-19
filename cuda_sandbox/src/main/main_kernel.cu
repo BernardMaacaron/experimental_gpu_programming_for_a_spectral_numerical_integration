@@ -302,7 +302,7 @@ Eigen::VectorXd integrateQuaternions()
     );
 
     // Launch kernel with one block
-    computeCMatrixKernel<<<1, number_of_Chebyshev_points>>>(d_K_stack, d_D_NN, d_C_NN);
+    computeCMatrixKernel<<<1, number_of_Chebyshev_points-1>>>(d_K_stack, d_D_NN, d_C_NN);
 
     // Free the memory
     CUDA_CHECK(
@@ -474,6 +474,7 @@ Eigen::VectorXd integrateQuaternions()
 
 
 
+
 // Used to build r_stack
 
 __device__ void quaternionToRotationMatrix(const double* q, double* R) {
@@ -493,7 +494,7 @@ __device__ void quaternionToRotationMatrix(const double* q, double* R) {
     R[8] = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3;
 }
 
-__global__ void updatePositionbKernel(const double* t_Q_stack_CUDA, double* t_b){
+__global__ void updatePositionbKernel(double* t_Q_stack_CUDA, double* t_b){
     
     int i = threadIdx.x;
 
@@ -514,23 +515,13 @@ __global__ void updatePositionbKernel(const double* t_Q_stack_CUDA, double* t_b)
     }
 }
 
-// Eigen::MatrixXd computeIvp(Eigen::MatrixXd t_Dn_IN_F, Eigen::Vector3d t_r_init)
-// {
-//     Eigen::MatrixXd ivp(number_of_Chebyshev_points-1, position_dimension);
-//     for(unsigned int i=0; i<(number_of_Chebyshev_points-1); i++)
-//     ivp.row(i) = Dn_IN_F(i, 0) * r_init.transpose();
-
-//     return ivp;
-// }
-
-__global__ void computeIvpKernel(const double* t_Dn_IN_F_data, const double* t_r_init_data, double* t_ivp) {
+_global_ void computeIvpKernel(double* t_Dn_IN_F, double* t_r_init, double* t_ivp) {
     int i = threadIdx.x;
 
-    Eigen::Map<const Eigen::MatrixXd> t_Dn_IN_F(t_Dn_IN_F_data, number_of_Chebyshev_points-1, 1); // the 1 at the end is because we only need one (the first) col of Dn_IN_F
-    Eigen::Map<const Eigen::Vector3d> t_r_init(t_r_init_data);
-
     if (i < number_of_Chebyshev_points-1) {
-        ivp.row(i) = t_Dn_IN_F(i, 0) * t_r_init.transpose();
+        t_ivp[i] = t_Dn_IN_F[i] * t_r_init[0];
+        t_ivp[i+1] = t_Dn_IN_F[i] * t_r_init[1];
+        t_ivp[i+2] = t_Dn_IN_F[i] * t_r_init[2];
     }
 }
 
@@ -566,11 +557,21 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
     double* d_Dn_IN_F;
 
     // Allocate the memory
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_Q_stack_CUDA), size_of_Q_stack_CUDA_in_bytes));
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_b), size_of_b_in_bytes));
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_r_init), size_of_r_init_in_bytes));
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_ivp), size_of_ivp_in_bytes));
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_Dn_IN_F), size_of_Dn_IN_F_in_bytes));
+    CUDA_CHECK(
+        cudaMalloc(reinterpret_cast<void **>(&d_Q_stack_CUDA), size_of_Q_stack_CUDA_in_bytes)
+    );
+    CUDA_CHECK(
+        cudaMalloc(reinterpret_cast<void **>(&d_b), size_of_b_in_bytes)
+    );
+    CUDA_CHECK(
+        cudaMalloc(reinterpret_cast<void **>(&d_r_init), size_of_r_init_in_bytes)
+    );
+    CUDA_CHECK(
+        cudaMalloc(reinterpret_cast<void **>(&d_ivp), size_of_ivp_in_bytes)
+    );
+    CUDA_CHECK(
+        cudaMalloc(reinterpret_cast<void **>(&d_Dn_IN_F), size_of_Dn_IN_F_in_bytes)
+    );
 
     //  Copy the data
     CUDA_CHECK(
@@ -580,14 +581,14 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
         cudaMemcpy(d_r_init, r_init.data(), size_of_r_init_in_bytes, cudaMemcpyHostToDevice)
     );
     CUDA_CHECK(
-        cudaMemcpy(d_Dn_IN_F, Dn_NN_F.data(), size_of_Dn_IN_F_in_bytes, cudaMemcpyHostToDevice)
+        cudaMemcpy(d_Dn_IN_F, Dn_IN_F.data(), size_of_Dn_IN_F_in_bytes, cudaMemcpyHostToDevice)
     );
 
     // Launch the kernel for b: the result of the kernel is stored into d_b
-    updatePositionbKernel<<<1, number_of_Chebyshev_points-1>>>(d_Q_stack_CUDA, d_b);
+    updatePositionbKernel<<<number_of_Chebyshev_points-1>>>(d_Q_stack_CUDA, d_b);
     
     // Launch the kernel for ivp: the result of the kernel is stored into d_b
-    computeIvpKernel<<<1, number_of_Chebyshev_points-1>>>(d_Dn_IN_F, d_r_init, d_ivp);
+    computeIvpKernel<<<number_of_Chebyshev_points-1>>>(d_Dn_IN_F, d_r_init, d_ivp);
 
     // Before we had b_NN = updatePositionb and thn res = B_NN -ivp so we have to do the same somehow 
 
@@ -664,7 +665,8 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
     );
 
     CUDA_CHECK(
-        cudaMemcpy(r_stack_CUDA.data(), d_r_stack, size_of_r_stack_in_bytes, cudaMemcpyDeviceToHost));
+        cudaMemcpy(r_stack_CUDA.data(), d_r_stack, size_of_r_stack_in_bytes, cudaMemcpyDeviceToHost)
+    );
 
     //FREEING MEMORY
     CUDA_CHECK(
@@ -754,39 +756,6 @@ __global__ void updateCMatrixKernel(const double* d_K_stack, const double* D_NN,
     }
     #pragma endregion
 }
-
-
-// Eigen::MatrixXd updateCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixXd &D_NN)
-// {
-//     Eigen::MatrixXd C_NN = D_NN;
-//     //  Define the Chebyshev points on the unit circle
-//     const auto Chebyshev_points = ComputeChebyshevPoints<number_of_Chebyshev_points>();
-
-//     Eigen::Vector3d K;
-//     Eigen::MatrixXd A_at_chebyshev_point(lambda_dimension/2, lambda_dimension/2);
-
-//     for(unsigned int i=0; i<Chebyshev_points.size()-1; i++){
-
-//         //  Extract the curvature from the strain
-//         K = Phi<na, ne>(Chebyshev_points[i])*t_qe;
-
-//         //  Build Skew Symmetric K matrix (K_hat)
-//         Eigen::Matrix3d K_hat = skew(K);
-//         A_at_chebyshev_point = K_hat.transpose();
-
-//         for (unsigned int row = 0; row < lambda_dimension/2; ++row) {
-//             for (unsigned int col = 0; col < lambda_dimension/2; ++col) {
-//                 int row_index = row*(number_of_Chebyshev_points-1)+i;
-//                 int col_index = col*(number_of_Chebyshev_points-1)+i;
-//                 C_NN(row_index, col_index) = D_NN(row_index, col_index) - A_at_chebyshev_point(row, col);
-//             }
-//         }
-
-//     }
-
-//     return C_NN;
-
-// }
 
 __global__ void computeNbarKernel(const double* t_Q_stack_CUDA_data, double* Nbar_stack_data) {
 int i = threadIdx.x;
@@ -1299,12 +1268,6 @@ Eigen::MatrixXd buildLambda(Eigen::MatrixXd t_C_stack_CUDA, Eigen::MatrixXd t_N_
 
 
 // Used to build Qa_stack
-<<<<<<< HEAD
-Eigen::MatrixXd updateQad_vector_b(Eigen::MatrixXd t_Lambda_stack)
-{
-    //  Define the Chebyshev points on the unit circle
-    const auto Chebyshev_points = ComputeChebyshevPoints<number_of_Chebyshev_points>();
-=======
 // CUDA kernel function to update Qad_vector_b
 __global__ void updateQad_vector_b_kernel(const double* t_Lambda_stack, double* B_NN) {
     // Get the global thread index
@@ -1333,32 +1296,6 @@ __global__ void updateQad_vector_b_kernel(const double* t_Lambda_stack, double* 
         }
     }
 }
-
-
-// Eigen::MatrixXd updateQad_vector_b(Eigen::MatrixXd t_Lambda_stack)
-// {
-//     //  Define the Chebyshev points on the unit circle
-//     const auto Chebyshev_points = ComputeChebyshevPoints<number_of_Chebyshev_points>();
-
-//     Eigen::MatrixXd B_NN(number_of_Chebyshev_points-1, Qa_dimension);
-
-//     Eigen::VectorXd b(Qa_dimension);
-
-//     Eigen::MatrixXd B(6, 3);
-//     B.block(0, 0, 3, 3).setIdentity();
-//     B.block(3, 0, 3, 3).setZero();
-
-//     for (unsigned int i = 0; i < number_of_Chebyshev_points-1; ++i) {
-
-//         // NOTE: Lambda_stack is already built without the first cheb. pt. however we need to index the Chebyshev_points[1] as our first cheb. pt (PORCA PUTTANA)
-//         b =  -Phi<na,ne>(Chebyshev_points[i+1]).transpose()*B.transpose()*t_Lambda_stack.block<lambda_dimension,1>(lambda_dimension*i,0);
-
-//         B_NN.block<1,Qa_dimension>(i, 0) = b.transpose();
-//     }
-//     return B_NN;
-// }
->>>>>>> Benchmarking_2023
-
 
 // Host function to update Qad_vector_b
 Eigen::MatrixXd updateQad_vector_b(Eigen::MatrixXd t_Lambda_stack) {
