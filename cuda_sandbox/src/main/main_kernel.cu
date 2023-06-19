@@ -515,7 +515,7 @@ __global__ void updatePositionbKernel(double* t_Q_stack_CUDA, double* t_b){
     }
 }
 
-_global_ void computeIvpKernel(double* t_Dn_IN_F, double* t_r_init, double* t_ivp) {
+__global__ void computeIvpKernel(double* t_Dn_IN_F, double* t_r_init, double* t_ivp) {
     int i = threadIdx.x;
 
     if (i < number_of_Chebyshev_points-1) {
@@ -585,10 +585,10 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
     );
 
     // Launch the kernel for b: the result of the kernel is stored into d_b
-    updatePositionbKernel<<<number_of_Chebyshev_points-1>>>(d_Q_stack_CUDA, d_b);
+    updatePositionbKernel<<<1, number_of_Chebyshev_points-1>>>(d_Q_stack_CUDA, d_b);
     
     // Launch the kernel for ivp: the result of the kernel is stored into d_b
-    computeIvpKernel<<<number_of_Chebyshev_points-1>>>(d_Dn_IN_F, d_r_init, d_ivp);
+    computeIvpKernel<<<1, number_of_Chebyshev_points-1>>>(d_Dn_IN_F, d_r_init, d_ivp);
 
     // Before we had b_NN = updatePositionb and thn res = B_NN -ivp so we have to do the same somehow 
 
@@ -785,16 +785,16 @@ int i = threadIdx.x;
         const auto size_of_Nbar_in_bytes = 3 * size_of_double;
 
         // Create Pointers
-        double* d_R;
-        double* d_Fg;
-        double* d_Nbar;
+        double* d_R = nullptr;
+        double* d_Fg = nullptr;
+        double* d_Nbar = nullptr;
 
         // Memory allocation
         CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_R), size_of_R_in_bytes));
         CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_Fg), size_of_Fg_in_bytes));
         CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_Nbar), size_of_Nbar_in_bytes));
 
-        CUDA_CHECK(cudaMemcpy(d_R, R, size_of_R_in_bytes, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(d_R, R.data(), size_of_R_in_bytes, cudaMemcpyHostToDevice));
         CUDA_CHECK(cudaMemcpy(d_Fg, Fg, size_of_Fg_in_bytes, cudaMemcpyHostToDevice));
 
         // cublasDgemm to perform Nbar = R.transpose()*Fg
@@ -851,7 +851,6 @@ Eigen::MatrixXd integrateInternalForces(Eigen::MatrixXd t_Q_stack_CUDA)
 
     // Launch kernel with one block
     updateCMatrixKernel<<<1, number_of_Chebyshev_points>>>(d_K_stack, d_D_NN, d_C_NN);
-    // Eigen::MatrixXd C_NN =  updateCMatrix(qe, D_NN);
 
     Eigen::VectorXd N_init(lambda_dimension/2);
     N_init << 1, 0, 0;
@@ -994,6 +993,38 @@ Eigen::MatrixXd integrateInternalForces(Eigen::MatrixXd t_Q_stack_CUDA)
 __global__ void updateCouplesbKernel(const double* t_N_stack_CUDA, double* d_beta) {
     int idx = threadIdx.x;
 
+    const Eigen::Vector3d C_bar = Eigen::Vector3d::Zero();
+    Eigen::Vector3d N;
+    // Dimensions definition
+    const int rows_skewGamma = 3;
+    const int cols_skewGamma = 3;        
+    const int ld_skewGamma = 3;
+
+    const int rows_N = N.rows();
+    const int cols_N = N.cols();
+    const int ld_N = rows_N;
+
+    const int rows_C_bar = C_bar.rows();
+    const int cols_C_bar = C_bar.cols();
+    const int ld_C_bar = rows_N;
+
+    const int ld_beta = ld_C_bar;
+    
+    // Create Pointers
+    double* d_skewGamma = nullptr;
+    double* d_N = nullptr;
+    double* d_C_bar = nullptr;
+
+    // Compute the memory occupation
+    const auto size_of_skewGamma_in_bytes = size_of_double * rows_skewGamma*cols_skewGamma;
+    const auto size_of_N_in_bytes = size_of_double * N.size();
+    const auto size_of_C_bar_in_bytes = size_of_double * C_bar.size();
+
+    // Allocate the memory
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_skewGamma), size_of_skewGamma_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_N), size_of_N_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_C_bar), size_of_C_bar_in_bytes));
+
     if (idx < number_of_Chebyshev_points - 1) {
         Eigen::VectorXd Gamma(lambda_dimension / 2);
         Gamma << 1, 0, 0;
@@ -1004,8 +1035,7 @@ __global__ void updateCouplesbKernel(const double* t_N_stack_CUDA, double* d_bet
                      Gamma(2), 0, -Gamma(0),
                     -Gamma(1), Gamma(0), 0;
 
-        const Eigen::Vector3d C_bar = Eigen::Vector3d::Zero();
-        Eigen::Vector3d N;
+
 
         int offset = idx * lambda_dimension / 2;
 
@@ -1013,35 +1043,6 @@ __global__ void updateCouplesbKernel(const double* t_N_stack_CUDA, double* d_bet
             N(i) = t_N_stack_CUDA[offset + i];
         }
 
-        // Dimensions definition
-        const int rows_skewGamma = 3;
-        const int cols_skewGamma = 3;        
-        const int ld_skewGamma = 3;
-
-        const int rows_N = N.rows();
-        const int cols_N = N.cols();
-        const int ld_N = rows_N;
-
-        const int rows_C_bar = C_bar.rows();
-        const int cols_C_bar = C_bar.cols();
-        const int ld_C_bar = rows_N;
-
-        const int ld_beta = ld_C_bar;
-        
-        // Create Pointers
-        double* d_skewGamma = nullptr;
-        double* d_N = nullptr;
-        double* d_C_bar = nullptr;
-
-        // Compute the memory occupation
-        const auto size_of_skewGamma_in_bytes = size_of_double * rows_skewGamma*cols_skewGamma;
-        const auto size_of_N_in_bytes = size_of_double * N.size();
-        const auto size_of_C_bar_in_bytes = size_of_double * C_bar.size();
-
-        // Allocate the memory
-        CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_skewGamma), size_of_skewGamma_in_bytes));
-        CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_N), size_of_N_in_bytes));
-        CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_C_bar), size_of_C_bar_in_bytes));
 
         //  Copy the data: cudaMemcpy(destination, file_to_copy, size_of_the_file, std_cmd)
         CUDA_CHECK(cudaMemcpy(d_skewGamma, skewGamma.data(), size_of_skewGamma_in_bytes, cudaMemcpyHostToDevice));
@@ -1057,9 +1058,10 @@ __global__ void updateCouplesbKernel(const double* t_N_stack_CUDA, double* d_bet
         for (int i = 0; i < lambda_dimension / 2; ++i) {
             d_beta[offset + i] = d_C_bar[i];
         }
-
-
     }
+    // Free kernel memory
+    CUDA_CHECK(cudaFree(d_skewGamma));
+    CUDA_CHECK(cudaFree(d_N));
 }
 
 Eigen::MatrixXd integrateInternalCouples(Eigen::MatrixXd t_N_stack_CUDA)
@@ -1122,9 +1124,6 @@ Eigen::MatrixXd integrateInternalCouples(Eigen::MatrixXd t_N_stack_CUDA)
     // Launch the kernel: computeNbarKernel
     updateCouplesbKernel<<<1, number_of_Chebyshev_points - 1>>>(d_N_stack_CUDA, d_beta_NN);
 
-    // Free kernel memory
-    CUDA_CHECK(cudaFree(d_skewGamma));
-    CUDA_CHECK(cudaFree(d_N));
 
     //  Copy the data
     CUDA_CHECK(cudaMemcpy(beta_NN.data(), d_beta_NN, size_of_beta_NN_in_bytes, cudaMemcpyDeviceToHost));
@@ -1274,7 +1273,7 @@ Eigen::MatrixXd buildLambda(Eigen::MatrixXd t_C_stack_CUDA, Eigen::MatrixXd t_N_
 
 // Used to build Qa_stack
 // CUDA kernel function to update Qad_vector_b
-__global__ void updateQad_vector_bKernel(double* t_Lambda_stack, double* B_NN) {
+__global__ void updateQad_vector_bKernel(double* d_Lambda_stack, double* B_NN) {
     int tid = threadIdx.x;
 
     // Define the Chebyshev points on the unit circle
@@ -1294,7 +1293,7 @@ __global__ void updateQad_vector_bKernel(double* t_Lambda_stack, double* B_NN) {
 
         // Compute b for the current Chebyshev point
         for (int i = 0; i < lambda_dimension; ++i) {
-            double* lambdaPtr = t_Lambda_stack + lambda_dimension * tid;
+            double* lambdaPtr = d_Lambda_stack + lambda_dimension * tid;
             Eigen::Map<Eigen::VectorXd> t_Lambda(lambdaPtr, lambda_dimension);
 
             b = -Phi_stack.block<na, na*ne>((tid+1)*(number_of_Chebyshev_points-1),0).transpose() * B.transpose() * t_Lambda;
@@ -1303,7 +1302,6 @@ __global__ void updateQad_vector_bKernel(double* t_Lambda_stack, double* B_NN) {
             B_NN_mat.row(tid) = b.transpose();
         }
     }
-
 }
 
 Eigen::MatrixXd integrateGeneralisedForces(Eigen::MatrixXd t_Lambda_stack)
@@ -1336,9 +1334,10 @@ Eigen::MatrixXd integrateGeneralisedForces(Eigen::MatrixXd t_Lambda_stack)
 
     // Launch kernel with one block
     updateQad_vector_bKernel<<<1, number_of_Chebyshev_points-1>>>(d_Lambda_stack, d_B_NN);
- 
-    // Free kernel memory
-    CUDA_CHECK(cudaFree(t_Lambda_stack));
+
+        // Free kernel memory
+    CUDA_CHECK(cudaFree(d_Lambda_stack));
+
 
     //Definition of matrices dimensions.
     const int rows_B_NN = B_NN.rows();
