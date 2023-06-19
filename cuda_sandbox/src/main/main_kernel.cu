@@ -164,7 +164,7 @@ __global__ void computeCMatrixKernel(const double* d_K_stack, const double* D_NN
         col_index = col * (number_of_Chebyshev_points - 1) + i;
         C_NN[row_index * quaternion_state_dimension + col_index] = D_NN[row_index * quaternion_state_dimension + col_index] + 0.5*d_K_stack[3*i+0];
     }
-    #pragma endregion Compute C_NN
+    #pragma endregion
 
     // for (unsigned int row = 0; row < quaternion_state_dimension; ++row) {
     //     for (unsigned int col = 0; col < quaternion_state_dimension; ++col) {
@@ -242,9 +242,9 @@ Eigen::VectorXd integrateQuaternions()
     #pragma region K_stack
 
     // Allocate memory on the device
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_Phi_stack), size_of_Phi_stack_in_bytes));
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_qe), size_of_qe_in_bytes));
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_K_stack), size_of_K_stack_in_bytes));
+    CUDA_CHECK(cudaMalloc((void**)&d_Phi_stack, size_of_Phi_stack_in_bytes));
+    CUDA_CHECK(cudaMalloc((void**)&d_qe, size_of_qe_in_bytes));
+    CUDA_CHECK(cudaMalloc((void**)&d_K_stack, size_of_K_stack_in_bytes));
 
     // Copy input data from host to device
     CUDA_CHECK(cudaMemcpy(d_Phi_stack, Phi_stack.data(), size_of_Phi_stack_in_bytes, cudaMemcpyHostToDevice));
@@ -264,7 +264,7 @@ Eigen::VectorXd integrateQuaternions()
     CUBLAS_CHECK(cublasDgemvStridedBatched(cublasH, CUBLAS_OP_N, na, na*ne, &alpha_cublas, d_Phi_stack, ld_Phi_stack, stride_Phi_stack,
                                             d_qe, inc_qe, stride_qe, &beta_cublas, d_K_stack, inc_K_stack, stride_K_stack, number_of_Chebyshev_points));
     
-    #pragma endregion K_stack
+    #pragma endregion
 
 
     //  Now stack the matrices in the diagonal of bigger ones (as meny times as the state dimension)
@@ -290,7 +290,7 @@ Eigen::VectorXd integrateQuaternions()
         cudaMalloc(reinterpret_cast<void **>(&d_D_NN), size_of_D_NN_in_bytes)
     );
     CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_C_NN), size_of_D_NN_in_bytes)
+        cudaMalloc(reinterpret_cast<void **>(&d_C_NN), size_of_D_NN_in_bytes) //Same size as D_NN 
     );
 
     //  Copy the data
@@ -477,7 +477,7 @@ Eigen::VectorXd integrateQuaternions()
 
 // Used to build r_stack
 
-__device__ void quaternionToRotationMatrix(double* q, double* R) {
+__device__ void quaternionToRotationMatrix(const double* q, double* R) {
     double q0 = q[0];
     double q1 = q[1];
     double q2 = q[2];
@@ -509,15 +509,13 @@ __global__ void updatePositionbKernel(double* t_Q_stack_CUDA, double* t_b){
 
         double R[9];
 
-
         quaternionToRotationMatrix(q, R);
 
         b.block<1, 3>(i, 0) = (Eigen::Map<Eigen::MatrixXd>(R, 3, 3) * Eigen::Vector3d(1, 0, 0)).transpose();
     }
 }
 
-__global__ void computeIvpKernel(double* t_Dn_IN_F, double* t_r_init, double* t_ivp)
-{
+_global_ void computeIvpKernel(double* t_Dn_IN_F, double* t_r_init, double* t_ivp) {
     int i = threadIdx.x;
 
     if (i < number_of_Chebyshev_points-1) {
@@ -587,10 +585,10 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
     );
 
     // Launch the kernel for b: the result of the kernel is stored into d_b
-    updatePositionbKernel<<<1, number_of_Chebyshev_points-1>>>(d_Q_stack_CUDA, d_b);
+    updatePositionbKernel<<<number_of_Chebyshev_points-1>>>(d_Q_stack_CUDA, d_b);
     
     // Launch the kernel for ivp: the result of the kernel is stored into d_b
-    computeIvpKernel<<<1, number_of_Chebyshev_points-1>>>(d_Dn_IN_F, d_r_init, d_ivp);
+    computeIvpKernel<<<number_of_Chebyshev_points-1>>>(d_Dn_IN_F, d_r_init, d_ivp);
 
     // Before we had b_NN = updatePositionb and thn res = B_NN -ivp so we have to do the same somehow 
 
@@ -1060,8 +1058,7 @@ __global__ void updateCouplesbKernel(const double* t_N_stack_CUDA, double* d_bet
             d_beta[offset + i] = d_C_bar[i];
         }
 
-        cudaFree(d_skewGamma);
-        cudaFree(d_N);
+
     }
 }
 
@@ -1101,7 +1098,7 @@ Eigen::MatrixXd integrateInternalCouples(Eigen::MatrixXd t_N_stack_CUDA)
     );
 
     // Launch kernel with one block
-    updateCMatrixKernel<<<1, number_of_Chebyshev_points>>>(d_K_stack, d_D_NN, d_C_NN);
+    updateCMatrixKernel<<<1, number_of_Chebyshev_points-1>>>(d_K_stack, d_D_NN, d_C_NN);
     
     Eigen::MatrixXd beta_NN = Eigen::MatrixXd::Zero((lambda_dimension/2)*(number_of_Chebyshev_points-1), 1);
 
@@ -1124,6 +1121,10 @@ Eigen::MatrixXd integrateInternalCouples(Eigen::MatrixXd t_N_stack_CUDA)
 
     // Launch the kernel: computeNbarKernel
     updateCouplesbKernel<<<1, number_of_Chebyshev_points - 1>>>(d_N_stack_CUDA, d_beta_NN);
+
+    // Free kernel memory
+    CUDA_CHECK(cudaFree(d_skewGamma));
+    CUDA_CHECK(cudaFree(d_N));
 
     //  Copy the data
     CUDA_CHECK(cudaMemcpy(beta_NN.data(), d_beta_NN, size_of_beta_NN_in_bytes, cudaMemcpyDeviceToHost));
@@ -1269,64 +1270,40 @@ Eigen::MatrixXd buildLambda(Eigen::MatrixXd t_C_stack_CUDA, Eigen::MatrixXd t_N_
 
 
 
+
+
 // Used to build Qa_stack
 // CUDA kernel function to update Qad_vector_b
-__global__ void updateQad_vector_b_kernel(const double* t_Lambda_stack, double* B_NN) {
-    // Get the global thread index
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void updateQad_vector_bKernel(double* t_Lambda_stack, double* B_NN) {
+    int tid = threadIdx.x;
+
+    // Define the Chebyshev points on the unit circle
+    // ComputeChebyshevPoints function implementation here...
+
 
     if (tid < number_of_Chebyshev_points - 1) {
-        // Compute the starting index for the current Chebyshev point
-        int index = lambda_dimension * tid;
+        // Create Eigen objects for B_NN and b
+        Eigen::Map<Eigen::MatrixXd> B_NN_mat(B_NN, number_of_Chebyshev_points - 1, Qa_dimension);
+        Eigen::VectorXd b(Qa_dimension);
+        
 
-        // Create the temporary variables
-        double b[Qa_dimension] = {0.0};
-
-        // Define B matrix
-        double B[6 * 3] = { /* Initialize with actual values */ };
+        // Create Eigen object for B
+        Eigen::Matrix<double, 6, 3> B;
+        B.block(0, 0, 3, 3).setIdentity();
+        B.block(3, 0, 3, 3).setZero();
 
         // Compute b for the current Chebyshev point
-        for (int i = 0; i < Qa_dimension; ++i) {
-            for (int j = 0; j < lambda_dimension; ++j) {
-                b[i] -= Phi_stack((tid + 1) * lambda_dimension + j) * B[j * 3 + i] * t_Lambda_stack[index + j];
-            }
-        }
+        for (int i = 0; i < lambda_dimension; ++i) {
+            double* lambdaPtr = t_Lambda_stack + lambda_dimension * tid;
+            Eigen::Map<Eigen::VectorXd> t_Lambda(lambdaPtr, lambda_dimension);
 
-        // Store b in B_NN
-        for (int i = 0; i < Qa_dimension; ++i) {
-            B_NN[tid * Qa_dimension + i] = b[i];
+            b = -Phi_stack.block<na, na*ne>((tid+1)*(number_of_Chebyshev_points-1),0).transpose() * B.transpose() * t_Lambda;
+
+            // Set the computed b in the B_NN matrix
+            B_NN_mat.row(tid) = b.transpose();
         }
     }
-}
 
-// Host function to update Qad_vector_b
-Eigen::MatrixXd updateQad_vector_b(Eigen::MatrixXd t_Lambda_stack) {
-    // Allocate device memory for t_Lambda_stack, and B_NN
-    double* d_t_Lambda_stack = nullptr;
-    double* d_B_NN = nullptr;
-    
-    cudaMalloc(&d_t_Lambda_stack, t_Lambda_stack.size() * size_of_double);
-    cudaMalloc(&d_B_NN, (number_of_Chebyshev_points - 1) * Qa_dimension * size_of_double);
-
-    // Copy t_Lambda_stack and Phi_stack from host to device
-    cudaMemcpy(d_t_Lambda_stack, t_Lambda_stack.data(), t_Lambda_stack.size() * size_of_double, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_Phi_stack, Phi_stack.data(), size_of_Phi_stack_in_bytes, cudaMemcpyHostToDevice);
-
-    // Launch the CUDA kernel
-    int threadsPerBlock = 256;
-    int blocksPerGrid = (number_of_Chebyshev_points - 1 + threadsPerBlock - 1) / threadsPerBlock;
-    updateQad_vector_b_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_t_Lambda_stack, d_B_NN);
-
-    // Copy B_NN from device to host
-    Eigen::MatrixXd B_NN(number_of_Chebyshev_points - 1, Qa_dimension);
-    cudaMemcpy(B_NN.data(), d_B_NN, (number_of_Chebyshev_points - 1) * Qa_dimension * size_of_double, cudaMemcpyDeviceToHost);
-
-    // Free device memory
-    cudaFree(d_t_Lambda_stack);
-    cudaFree(d_Phi_stack);
-    cudaFree(d_B_NN);
-
-    return B_NN;
 }
 
 Eigen::MatrixXd integrateGeneralisedForces(Eigen::MatrixXd t_Lambda_stack)
@@ -1342,8 +1319,27 @@ Eigen::MatrixXd integrateGeneralisedForces(Eigen::MatrixXd t_Lambda_stack)
     // Dn_NN is constant so we can pre-invert
     Eigen::MatrixXd Dn_NN_inv = Dn_NN_B.inverse();
 
-    B_NN = updateQad_vector_b(t_Lambda_stack);
+    // Compute the memory occupation 
+    const auto size_of_B_NN_in_bytes = B_NN.size() * size_of_double;
+    const auto size_of_Lambda_stack_in_bytes = t_Lambda_stack.size() * size_of_double;
     
+    // Create Pointers
+    double* d_B_NN = nullptr;
+    double* d_Lambda_stack = nullptr;
+
+    // Allocate the memory
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_B_NN), size_of_B_NN_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_Lambda_stack), size_of_Lambda_stack_in_bytes));
+    
+    //  Copy the data
+    CUDA_CHECK(cudaMemcpy(d_Lambda_stack, t_Lambda_stack.data(), size_of_Lambda_stack_in_bytes, cudaMemcpyHostToDevice));
+
+    // Launch kernel with one block
+    updateQad_vector_bKernel<<<1, number_of_Chebyshev_points-1>>>(d_Lambda_stack, d_B_NN);
+ 
+    // Free kernel memory
+    CUDA_CHECK(cudaFree(t_Lambda_stack));
+
     //Definition of matrices dimensions.
     const int rows_B_NN = B_NN.rows();
     const int cols_B_NN = B_NN.cols();
@@ -1358,34 +1354,19 @@ Eigen::MatrixXd integrateGeneralisedForces(Eigen::MatrixXd t_Lambda_stack)
     const int ld_Qa_stack = rows_Qa_stack;
 
     // Create Pointers
-    double* d_B_NN = nullptr;
     double* d_Dn_NN_inv = nullptr;    
     double* d_Qa_stack = nullptr;
 
     // Compute the memory occupation
-    const auto size_of_B_NN_in_bytes = size_of_double * B_NN.size();
     const auto size_of_Dn_NN_inv_in_bytes = size_of_double * Dn_NN_inv.size();
     const auto size_of_Qa_stack_in_bytes = size_of_double * rows_Qa_stack * cols_Qa_stack;
 
     // Allocate the memory
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_B_NN), size_of_B_NN_in_bytes)
-    );
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_Dn_NN_inv), size_of_Dn_NN_inv_in_bytes)
-    );
-    CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_Qa_stack), size_of_Qa_stack_in_bytes)
-    );
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_Dn_NN_inv), size_of_Dn_NN_inv_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_Qa_stack), size_of_Qa_stack_in_bytes));
 
     //  Copy the data: cudaMemcpy(destination, file_to_copy, size_of_the_file, std_cmd)
-    CUDA_CHECK(
-        cudaMemcpy(d_B_NN, B_NN.data(), size_of_B_NN_in_bytes, cudaMemcpyHostToDevice)
-    );
-    CUDA_CHECK(
-        cudaMemcpy(d_Dn_NN_inv, Dn_NN_inv.data(), size_of_Dn_NN_inv_in_bytes, cudaMemcpyHostToDevice)
-    );
-
+    CUDA_CHECK(cudaMemcpy(d_Dn_NN_inv, Dn_NN_inv.data(), size_of_Dn_NN_inv_in_bytes, cudaMemcpyHostToDevice));
 
     // Variable to check the result
     Eigen::MatrixXd Qa_stack_CUDA(rows_Qa_stack, cols_Qa_stack);
@@ -1421,31 +1402,7 @@ Eigen::MatrixXd integrateGeneralisedForces(Eigen::MatrixXd t_Lambda_stack)
 
 int main(int argc, char *argv[])
 {
-/* step 1: create cublas handle, bind a stream 
 
-    Explaination:
-
-    The handler is an object which is used to manage the api in its threads and eventually thrown errors
-
-
-    Then there are the streams. But we don't need to know what they are.
-    We do not use them for now.
-
-    If you are interested:
-
-    Streams define the flow of data when copying.
-    Imagine: We have 100 units of data (whatever it is) to copy from one place to another.
-    Memory is already allocated. 
-    Normal way: copy data 1, then data 2, than data 3, ..... untill the end.
-
-    With streams, we copy data in parallel. It boils down to this.
-    Here you can find a more detailed and clear explaination (with figures)
-
-    Look only at the first 6 slides
-
-    https://on-demand.gputechconf.com/gtc/2014/presentations/S4158-cuda-streams-best-practices-common-pitfalls.pdf
-
-*/
     //  cuda blas api need CUBLAS_CHECK
     CUBLAS_CHECK(
         cublasCreate(&cublasH)
