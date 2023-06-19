@@ -272,14 +272,14 @@ target_link_libraries(${PROJECT_NAME}_main_benchmark_GPU
         )
 # Add custom command to export benchmark results as CSV
 add_custom_command(TARGET ${PROJECT_NAME}_main_benchmark_GPU POST_BUILD
-    COMMAND ${PROJECT_NAME}_main_benchmark_GPU --benchmark_out_format=csv --benchmark_out="main_benchmark_GPU_result.csv"
+    COMMAND ${PROJECT_NAME}_main_benchmark_GPU --benchmark_out_format=csv --benchmark_out="main_benchmark_GPU_na_2_ne_3.csv"
     # ${PROJECT_NAME}_matMul_benchmark --benchmark_format=csv
     COMMENT "Exporting benchmark results to result.csv"
 )
 
 #MAIN BENCHMARK GPU Kernel Executable
-add_executable(${PROJECT_NAME}_main_benchmark_kernel
-        src/benchmark_2023/main_benchmark_kernel.cu
+add_executable(${PROJECT_NAME}_main_benchmark_kernel_GPU
+        src/benchmark_2023/main_benchmark_kernel_GPU.cu
         include/chebyshev_differentiation.h
         include/utilities.h
         include/spectral_integration_utilities.h
@@ -287,11 +287,11 @@ add_executable(${PROJECT_NAME}_main_benchmark_kernel
         include/globals.h
         include/getCusolverErrorString.h
 )
-target_include_directories(${PROJECT_NAME}_main_benchmark_kernel 
+target_include_directories(${PROJECT_NAME}_main_benchmark_kernel_GPU 
     PUBLIC
         ${CUDA_INCLUDE_DIRS}
 )
-target_link_libraries(${PROJECT_NAME}_main_benchmark_kernel
+target_link_libraries(${PROJECT_NAME}_main_benchmark_kernel_GPU
     PUBLIC
         cusolver
         cublas
@@ -299,8 +299,8 @@ target_link_libraries(${PROJECT_NAME}_main_benchmark_kernel
         benchmark::benchmark
         )
 # Add custom command to export benchmark results as CSV
-add_custom_command(TARGET ${PROJECT_NAME}_main_benchmark_kernel POST_BUILD
-    COMMAND ${PROJECT_NAME}_main_benchmark_kernel --benchmark_out_format=csv --benchmark_out="main_benchmark_kernel_result.csv"
+add_custom_command(TARGET ${PROJECT_NAME}_main_benchmark_kernel_GPU POST_BUILD
+    COMMAND ${PROJECT_NAME}_main_benchmark_kernel_GPU --benchmark_out_format=csv --benchmark_out="main_benchmark_kernel_GPU.csv"
     # ${PROJECT_NAME}_matMul_benchmark --benchmark_format=csv
     COMMENT "Exporting benchmark results to result.csv"
 )

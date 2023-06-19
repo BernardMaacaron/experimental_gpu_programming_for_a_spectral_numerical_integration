@@ -17,6 +17,8 @@
 
 #include <Eigen/Dense>
 #include <unsupported/Eigen/KroneckerProduct>
+#include <benchmark/benchmark.h>
+
 
 //GLOBAL VARIABLES ARE DEFINED IN globals.h
 
@@ -289,10 +291,11 @@ Eigen::VectorXd integrateQuaternions()
     CUDA_CHECK(cudaFree(d_res));
     CUDA_CHECK(cudaFree(d_work));
 
+    return Q_stack_CUDA;
 
     })->Repetitions(20)->Unit(::benchmark::kMicrosecond);
 
-    return Q_stack_CUDA;
+
 }
 
 
@@ -443,9 +446,10 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
     CUDA_CHECK(cudaFree(d_Dn_NN_inv));
     CUDA_CHECK(cudaFree(d_r_stack));
 
+    return r_stack_CUDA;
+
     })->Repetitions(20)->Unit(::benchmark::kMicrosecond);
 
-    return r_stack_CUDA;
 }
 
 
@@ -687,9 +691,10 @@ Eigen::MatrixXd integrateInternalForces(Eigen::MatrixXd t_Q_stack_CUDA)
     CUDA_CHECK(cudaFree(d_Nbar_stack));
     CUDA_CHECK(cudaFree(d_D_NN));
 
+    return N_stack_CUDA;
+
     })->Repetitions(20)->Unit(::benchmark::kMicrosecond);
 
-    return N_stack_CUDA;
 }
 
 __global__ void updateCouplesbKernel(const double* t_N_stack_CUDA, double* d_beta) {
@@ -859,9 +864,10 @@ Eigen::MatrixXd integrateInternalCouples(Eigen::MatrixXd t_N_stack_CUDA)
     CUDA_CHECK(cudaFree(d_info));
     CUDA_CHECK(cudaFree(d_work));
 
+    return C_stack_CUDA;
+
     })->Repetitions(20)->Unit(::benchmark::kMicrosecond);
 
-    return C_stack_CUDA;
 }
 
 Eigen::MatrixXd buildLambda(Eigen::MatrixXd t_C_stack_CUDA, Eigen::MatrixXd t_N_stack_CUDA)
@@ -1011,10 +1017,11 @@ Eigen::MatrixXd integrateGeneralisedForces(Eigen::MatrixXd t_Lambda_stack)
     CUDA_CHECK(cudaFree(d_Qa_stack));
     CUDA_CHECK(cudaFree(d_Dn_NN_inv));
     CUDA_CHECK(cudaFree(d_Lambda_stack));
+    
+    return Qa_stack_CUDA;
 
     })->Repetitions(20)->Unit(::benchmark::kMicrosecond);
 
-    return Qa_stack_CUDA;
 }
 
 

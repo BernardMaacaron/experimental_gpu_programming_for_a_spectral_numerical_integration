@@ -7,9 +7,9 @@ constexpr unsigned int na = 3;  //  Kirkhoff rod
 constexpr unsigned int ne = 3;  // dimesion of qe
 constexpr unsigned int num_ch_nodes = 5;
 
-
-
 static const unsigned int number_of_Chebyshev_points = 16;
+
+
 
 static const unsigned int quaternion_state_dimension = 4;
 static const unsigned int position_dimension = 3;
