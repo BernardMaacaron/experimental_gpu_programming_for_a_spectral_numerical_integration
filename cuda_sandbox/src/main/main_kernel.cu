@@ -164,7 +164,7 @@ __global__ void computeCMatrixKernel(const double* d_K_stack, const double* D_NN
         col_index = col * (number_of_Chebyshev_points - 1) + i;
         C_NN[row_index * quaternion_state_dimension + col_index] = D_NN[row_index * quaternion_state_dimension + col_index] + 0.5*d_K_stack[3*i+0];
     }
-    #pragma endregion
+    #pragma endregion Compute C_NN
 
     // for (unsigned int row = 0; row < quaternion_state_dimension; ++row) {
     //     for (unsigned int col = 0; col < quaternion_state_dimension; ++col) {
@@ -242,9 +242,9 @@ Eigen::VectorXd integrateQuaternions()
     #pragma region K_stack
 
     // Allocate memory on the device
-    CUDA_CHECK(cudaMalloc((void**)&d_Phi_stack, size_of_Phi_stack_in_bytes));
-    CUDA_CHECK(cudaMalloc((void**)&d_qe, size_of_qe_in_bytes));
-    CUDA_CHECK(cudaMalloc((void**)&d_K_stack, size_of_K_stack_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_Phi_stack), size_of_Phi_stack_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_qe), size_of_qe_in_bytes));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_K_stack), size_of_K_stack_in_bytes));
 
     // Copy input data from host to device
     CUDA_CHECK(cudaMemcpy(d_Phi_stack, Phi_stack.data(), size_of_Phi_stack_in_bytes, cudaMemcpyHostToDevice));
@@ -264,7 +264,7 @@ Eigen::VectorXd integrateQuaternions()
     CUBLAS_CHECK(cublasDgemvStridedBatched(cublasH, CUBLAS_OP_N, na, na*ne, &alpha_cublas, d_Phi_stack, ld_Phi_stack, stride_Phi_stack,
                                             d_qe, inc_qe, stride_qe, &beta_cublas, d_K_stack, inc_K_stack, stride_K_stack, number_of_Chebyshev_points));
     
-    #pragma endregion
+    #pragma endregion K_stack
 
 
     //  Now stack the matrices in the diagonal of bigger ones (as meny times as the state dimension)
@@ -290,7 +290,7 @@ Eigen::VectorXd integrateQuaternions()
         cudaMalloc(reinterpret_cast<void **>(&d_D_NN), size_of_D_NN_in_bytes)
     );
     CUDA_CHECK(
-        cudaMalloc(reinterpret_cast<void **>(&d_C_NN), size_of_D_NN_in_bytes) //Same size as D_NN
+        cudaMalloc(reinterpret_cast<void **>(&d_C_NN), size_of_D_NN_in_bytes)
     );
 
     //  Copy the data
@@ -477,7 +477,7 @@ Eigen::VectorXd integrateQuaternions()
 
 // Used to build r_stack
 
-__device__ void quaternionToRotationMatrix(const double* q, double* R) {
+__device__ void quaternionToRotationMatrix(double* q, double* R) {
     double q0 = q[0];
     double q1 = q[1];
     double q2 = q[2];
@@ -509,13 +509,15 @@ __global__ void updatePositionbKernel(double* t_Q_stack_CUDA, double* t_b){
 
         double R[9];
 
+
         quaternionToRotationMatrix(q, R);
 
         b.block<1, 3>(i, 0) = (Eigen::Map<Eigen::MatrixXd>(R, 3, 3) * Eigen::Vector3d(1, 0, 0)).transpose();
     }
 }
 
-_global_ void computeIvpKernel(double* t_Dn_IN_F, double* t_r_init, double* t_ivp) {
+__global__ void computeIvpKernel(double* t_Dn_IN_F, double* t_r_init, double* t_ivp)
+{
     int i = threadIdx.x;
 
     if (i < number_of_Chebyshev_points-1) {
@@ -585,10 +587,10 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
     );
 
     // Launch the kernel for b: the result of the kernel is stored into d_b
-    updatePositionbKernel<<<number_of_Chebyshev_points-1>>>(d_Q_stack_CUDA, d_b);
+    updatePositionbKernel<<<1, number_of_Chebyshev_points-1>>>(d_Q_stack_CUDA, d_b);
     
     // Launch the kernel for ivp: the result of the kernel is stored into d_b
-    computeIvpKernel<<<number_of_Chebyshev_points-1>>>(d_Dn_IN_F, d_r_init, d_ivp);
+    computeIvpKernel<<<1, number_of_Chebyshev_points-1>>>(d_Dn_IN_F, d_r_init, d_ivp);
 
     // Before we had b_NN = updatePositionb and thn res = B_NN -ivp so we have to do the same somehow 
 
@@ -1286,7 +1288,7 @@ __global__ void updateQad_vector_b_kernel(const double* t_Lambda_stack, double* 
         // Compute b for the current Chebyshev point
         for (int i = 0; i < Qa_dimension; ++i) {
             for (int j = 0; j < lambda_dimension; ++j) {
-                b[i] -= Phi_stack[(tid + 1) * lambda_dimension + j] * B[j * 3 + i] * t_Lambda_stack[index + j];
+                b[i] -= Phi_stack((tid + 1) * lambda_dimension + j) * B[j * 3 + i] * t_Lambda_stack[index + j];
             }
         }
 
