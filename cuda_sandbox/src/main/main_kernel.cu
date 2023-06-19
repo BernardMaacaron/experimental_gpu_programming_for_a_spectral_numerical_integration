@@ -162,8 +162,6 @@ Eigen::VectorXd integrateQuaternions()
 
     Eigen::MatrixXd b = Eigen::MatrixXd::Zero(quaternion_problem_dimension,1);
 
-    Eigen::MatrixXd Q_stack_CUDA(rows_Q_stack, cols_Q_stack); //What we want to calculate
-
     // Dimension definition
     const int rows_D_IN = D_IN.rows();
     const int cols_D_IN = D_IN.cols();
@@ -186,6 +184,8 @@ Eigen::VectorXd integrateQuaternions()
 
     const int rows_Q_stack = rows_C_NN;
     const int cols_Q_stack = cols_b;
+
+    Eigen::MatrixXd Q_stack_CUDA(rows_Q_stack, cols_Q_stack); //What we want to calculate
 
     // LU factorization variables
     int info = 0;
@@ -278,10 +278,6 @@ Eigen::VectorXd integrateQuaternions()
 
 
 
-
-
-
-
 // Used to build r_stack
 __global__ void computeIvpKernel(double* t_Dn_IN_F, double* t_r_init, double* t_ivp) {
     int i = threadIdx.x;
@@ -332,8 +328,6 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
 
     Eigen::MatrixXd res(number_of_Chebyshev_points-1, position_dimension);
 
-    Eigen::MatrixXd r_stack_CUDA(rows_r_stack, cols_r_stack); // What we want to calculate 
-
     // Dimension definition
     const int rows_Dn_NN_inv = Dn_NN_inv.rows();
     const int cols_Dn_NN_inv = Dn_NN_inv.cols();
@@ -346,6 +340,8 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
     const int rows_r_stack = rows_Dn_NN_inv;
     const int cols_r_stack = cols_res;
     const int ld_r_stack = rows_r_stack;
+
+    Eigen::MatrixXd r_stack_CUDA(rows_r_stack, cols_r_stack); // What we want to calculate 
 
     // Compute the memory occupation for computeIvpKernel/updatePositionbKernel
     const auto size_of_Q_stack_CUDA_in_bytes = t_Q_stack_CUDA.size() * size_of_double;
@@ -413,10 +409,6 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
 
     return r_stack_CUDA;
 }
-
-
-
-
 
 
 
@@ -523,8 +515,6 @@ Eigen::MatrixXd integrateInternalForces(Eigen::MatrixXd t_Q_stack_CUDA)
 
     Eigen::MatrixXd beta = Eigen::MatrixXd::Zero((lambda_dimension/2)*(number_of_Chebyshev_points-1),1);
 
-    Eigen::MatrixXd N_stack_CUDA(rows_N_stack, cols_N_stack); //What we want to calculate
-
     // Dimension definition
     const int rows_C_NN = C_NN.rows();
     const int cols_C_NN = C_NN.cols();
@@ -544,6 +534,8 @@ Eigen::MatrixXd integrateInternalForces(Eigen::MatrixXd t_Q_stack_CUDA)
 
     const int rows_N_stack = rows_beta;
     const int cols_N_stack = cols_beta;
+
+    Eigen::MatrixXd N_stack_CUDA(rows_N_stack, cols_N_stack); //What we want to calculate
     
     int info = 0;
     int lwork = 0;
@@ -868,8 +860,6 @@ Eigen::MatrixXd integrateGeneralisedForces(Eigen::MatrixXd t_Lambda_stack)
 
     Eigen::MatrixXd Dn_NN_inv = Dn_NN_B.inverse(); // Dn_NN is constant so we can pre-invert
 
-    Eigen::MatrixXd Qa_stack_CUDA(rows_Qa_stack, cols_Qa_stack); // Variable to check the result
-
     //Definition of matrices dimensions.
     const int rows_B_NN = B_NN.rows();
     const int cols_B_NN = B_NN.cols();
@@ -882,6 +872,8 @@ Eigen::MatrixXd integrateGeneralisedForces(Eigen::MatrixXd t_Lambda_stack)
     const int rows_Qa_stack = rows_Dn_NN_inv;
     const int cols_Qa_stack = cols_B_NN;
     const int ld_Qa_stack = rows_Qa_stack;
+
+    Eigen::MatrixXd Qa_stack_CUDA(rows_Qa_stack, cols_Qa_stack); // What we want to calculate
 
     // Compute the memory occupation for updateQad_vector_bKernel
     const auto size_of_B_NN_in_bytes = B_NN.size() * size_of_double;
@@ -967,10 +959,10 @@ int main(int argc, char *argv[])
     }
 
     const auto Q_stack_CUDA = integrateQuaternions();
-    std::cout << "Quaternion Integration : \n" << Q_stack_CUDA << std::endl;
+    std::cout << "Quaternion Integration : \n" << Q_stack_CUDA << "\n" << std::endl;
     
     const auto r_stack_CUDA = integratePosition(Q_stack_CUDA);
-    std::cout << "Position Integration : \n" << r_stack_CUDA << std::endl;
+    std::cout << "Position Integration : \n" << r_stack_CUDA << "\n" << std::endl;
 
     const auto N_stack_CUDA = integrateInternalForces(Q_stack_CUDA);
     std::cout << "Internal Forces Integration : \n" << N_stack_CUDA << "\n" << std::endl;
