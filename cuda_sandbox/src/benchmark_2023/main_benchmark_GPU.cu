@@ -19,26 +19,6 @@
 #include <unsupported/Eigen/KroneckerProduct>
 #include <benchmark/benchmark.h>
 
-
-static const unsigned int number_of_Chebyshev_points = 16;
-
-static const unsigned int quaternion_state_dimension = 4;
-static const unsigned int position_dimension = 3;
-static const unsigned int quaternion_problem_dimension = quaternion_state_dimension * (number_of_Chebyshev_points-1);
-
-static const unsigned int lambda_dimension = 6;
-
-static const unsigned int Qa_dimension = 9;
-
-Eigen::Matrix<double, ne*na, 1> qe;
-
-
-// CUDA specific variables
-const auto size_of_double = sizeof(double);
-cusolverDnHandle_t cusolverH = NULL;
-cublasHandle_t cublasH = NULL;
-
-
 // Used to build Q_stack
 Eigen::MatrixXd computeCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixXd &D_NN)
 {
@@ -1384,7 +1364,7 @@ int main(int argc, char *argv[])
             0,
             0,
             0;
-    //qe.setZero();
+    qe.setZero();
     
 
     const auto Q_stack_CUDA = integrateQuaternions();

@@ -66,6 +66,9 @@ static const Eigen::MatrixXd Phi(const double t_X, const double &t_begin=0, cons
     return Phi;
 }
 
+
+
+
 static const Eigen::MatrixXd toMatrix(const Eigen::MatrixXd t_matrix, const unsigned int number_of_Chebyshev_points)
 {
     Eigen::MatrixXd output_mat(3, number_of_Chebyshev_points);
