@@ -28,38 +28,6 @@
 
 // Things to compute before hand rotation matrix stack and K stack
 
-static const unsigned int number_of_Chebyshev_points = 16;
-
-static const unsigned int quaternion_state_dimension = 4;
-static const unsigned int position_dimension = 3;
-static const unsigned int quaternion_problem_dimension = quaternion_state_dimension * (number_of_Chebyshev_points-1);
-
-static const unsigned int lambda_dimension = 6;
-
-static const unsigned int Qa_dimension = 9;
-
-Eigen::Matrix<double, ne*na, 1> qe;
-
-//  Obtain the Chebyshev differentiation matrix
-const Eigen::MatrixXd Dn = getDn<number_of_Chebyshev_points>();
-
-//FORWARD INTEGRATION:
-//  Extract D_NN from the differentiation matrix (for the spectral integration)
-const Eigen::MatrixXd Dn_NN_F = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(0, 0);
-//  Extract D_IN (for the propagation of initial conditions)
-const Eigen::MatrixXd Dn_IN_F = Dn.block<number_of_Chebyshev_points-1, 1>(0, number_of_Chebyshev_points-1);
-
-//BACKWARD INTEGRATION:
-//  Extract D_NN from the differentiation matrix (for the spectral integration)
-const Eigen::MatrixXd Dn_NN_B = Dn.block<number_of_Chebyshev_points-1, number_of_Chebyshev_points-1>(1, 1);
-//  Extract D_IN (for the propagation of initial conditions)
-const Eigen::MatrixXd Dn_IN_B = Dn.block<number_of_Chebyshev_points-1, 1>(1, 0);
-
-
-// CUDA specific variables
-const auto size_of_double = sizeof(double);
-cusolverDnHandle_t cusolverH = NULL;
-cublasHandle_t cublasH = NULL;
 
 
 // Used to build Q_stack
@@ -73,10 +41,12 @@ Eigen::MatrixXd computeCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixX
     Eigen::MatrixXd Z_at_chebyshev_point(quaternion_state_dimension, quaternion_state_dimension);
     Eigen::MatrixXd A_at_chebyshev_point(quaternion_state_dimension, quaternion_state_dimension);
 
+    std::cout << "K = " << std::endl;
     for(unsigned int i=0; i<Chebyshev_points.size()-1; i++){
 
         //  Extract the curvature from the strain
         K = Phi<na, ne>(Chebyshev_points[i])*t_qe;
+        std::cout<< K << std::endl;
 
         //  Compute the A matrix of Q' = 1/2 A(K) Q
         Z_at_chebyshev_point <<      0, -K(0),  -K(1),  -K(2),
@@ -990,19 +960,19 @@ int main(int argc, char *argv[])
     
 
     const auto Q_stack_CUDA = integrateQuaternions();
-    std::cout << "Quaternion Integration : \n" << Q_stack_CUDA << std::endl;
+    // std::cout << "Quaternion Integration : \n" << Q_stack_CUDA << std::endl;
     
     const auto r_stack_CUDA = integratePosition(Q_stack_CUDA);
-    std::cout << "Position Integration : \n" << r_stack_CUDA << std::endl;
+    // std::cout << "Position Integration : \n" << r_stack_CUDA << std::endl;
 
     const auto N_stack_CUDA = integrateInternalForces(Q_stack_CUDA);
-    std::cout << "Internal Forces Integration : \n" << N_stack_CUDA << "\n" << std::endl;
+    // std::cout << "Internal Forces Integration : \n" << N_stack_CUDA << "\n" << std::endl;
 
     const auto C_stack_CUDA = integrateInternalCouples(N_stack_CUDA);
-    std::cout << "Internal Couples Integration : \n" << C_stack_CUDA << "\n" << std::endl;
+    // std::cout << "Internal Couples Integration : \n" << C_stack_CUDA << "\n" << std::endl;
 
-    std::cout << "Internal Forces MATRIX : \n" << toMatrix(N_stack_CUDA, number_of_Chebyshev_points) << "\n" << std::endl;
-    std::cout << "Internal Couples MATRIX : \n" << toMatrix(C_stack_CUDA, number_of_Chebyshev_points) << "\n" << std::endl;
+    // std::cout << "Internal Forces MATRIX : \n" << toMatrix(N_stack_CUDA, number_of_Chebyshev_points) << "\n" << std::endl;
+    // std::cout << "Internal Couples MATRIX : \n" << toMatrix(C_stack_CUDA, number_of_Chebyshev_points) << "\n" << std::endl;
     
     // const auto Lambda_stack_CUDA = buildLambda(C_stack_CUDA, N_stack_CUDA);
     // //std::cout << "Lambda_stack : \n" << Lambda_stack_CUDA << "\n" << std::endl;

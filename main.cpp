@@ -110,7 +110,6 @@ Eigen::VectorXd integrateQuaternions()
 
 
     Eigen::MatrixXd C_NN =  computeCMatrix(qe, D_NN);
-
     Eigen::VectorXd q_init(4);
     q_init << 1, 0, 0, 0;
 

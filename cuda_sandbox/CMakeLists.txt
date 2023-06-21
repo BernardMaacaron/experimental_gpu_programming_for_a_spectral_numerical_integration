@@ -40,7 +40,7 @@ set(CMAKE_CUDA_STANDARD 11)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
-#                                       needed to pass lambdas to kernels
+#needed to pass lambdas to kernels
 #SET(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}  --expt-extended-lambda; # --opt-level=4 
 #)
 
@@ -303,4 +303,59 @@ add_custom_command(TARGET ${PROJECT_NAME}_main_benchmark_kernel_GPU POST_BUILD
     COMMAND ${PROJECT_NAME}_main_benchmark_kernel_GPU --benchmark_out_format=csv --benchmark_out="main_benchmark_kernel_GPU_na_2_ne_3.csv"
     # ${PROJECT_NAME}_matMul_benchmark --benchmark_format=csv
     COMMENT "Exporting benchmark results to result.csv"
+)
+
+
+
+
+#Benchmark QUaternion GPU Executable
+add_executable(${PROJECT_NAME}_benchmark_quaternion
+        src/benchmark_2023/benchmark_quaternion.cu
+        include/chebyshev_differentiation.h
+        include/utilities.h
+        include/spectral_integration_utilities.h
+        include/lie_algebra_utilities.h
+        include/globals.h
+        include/getCusolverErrorString.h
+)
+target_include_directories(${PROJECT_NAME}_benchmark_quaternion
+    PUBLIC
+        ${CUDA_INCLUDE_DIRS}
+)
+target_link_libraries(${PROJECT_NAME}_benchmark_quaternion
+    PUBLIC
+        cusolver
+        cublas
+        Eigen3::Eigen
+        benchmark::benchmark
+        )
+# Add custom command to export benchmark results as CSV
+add_custom_command(TARGET ${PROJECT_NAME}_benchmark_quaternion POST_BUILD
+    COMMAND ${PROJECT_NAME}_benchmark_quaternion --benchmark_out_format=csv --benchmark_out="benchmark_quaternion_13.csv"
+    # ${PROJECT_NAME}_matMul_benchmark --benchmark_format=csv
+    COMMENT "Exporting benchmark results to result.csv"
+)
+
+
+
+
+
+add_executable(${PROJECT_NAME}stridedBatch
+        src/benchmark_2023/stridedBatch.cu
+        include/chebyshev_differentiation.h
+        include/utilities.h
+        include/spectral_integration_utilities.h
+        include/lie_algebra_utilities.h
+        include/globals.h
+        include/getCusolverErrorString.h
+)
+target_include_directories(${PROJECT_NAME}stridedBatch
+    PUBLIC
+        ${CUDA_INCLUDE_DIRS}
+)
+target_link_libraries(${PROJECT_NAME}stridedBatch
+    PUBLIC
+        cusolver
+        cublas
+        Eigen3::Eigen
 )
