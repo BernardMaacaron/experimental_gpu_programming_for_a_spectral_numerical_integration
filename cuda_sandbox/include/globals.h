@@ -52,6 +52,7 @@ static const unsigned int position_dimension = 3;
 static const unsigned int quaternion_problem_dimension = quaternion_state_dimension * (number_of_Chebyshev_points-1);
 
 static const unsigned int lambda_dimension = 6;
+static const unsigned int half_lambda_problem_dimension = lambda_dimension * (number_of_Chebyshev_points-1) *0.5;
 
 static const unsigned int Qa_dimension = 9;
 
@@ -95,6 +96,6 @@ int size_of_Phi_stack_in_bytes = (na * number_of_Chebyshev_points) * (na * ne) *
 
 // K_stack parameters for GPU
 double* d_K_stack = nullptr;
-int size_of_K_stack_in_bytes = na * number_of_Chebyshev_points * size_of_double;
+int size_of_K_stack_in_bytes = 3 * number_of_Chebyshev_points * size_of_double;
 
 #endif

@@ -276,7 +276,6 @@ Eigen::MatrixXd integratePosition(Eigen::MatrixXd t_Q_stack_CUDA)
     for(unsigned int i=0; i<number_of_Chebyshev_points-1; i++)
         ivp.row(i) = Dn_IN_F(i, 0) * r_init.transpose();
     
-
     Eigen::MatrixXd b_NN(number_of_Chebyshev_points - 1, position_dimension);
     b_NN = updatePositionb(t_Q_stack_CUDA);
 
@@ -368,10 +367,10 @@ Eigen::MatrixXd updateCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixXd
     Eigen::Vector3d K;
     Eigen::MatrixXd A_at_chebyshev_point(lambda_dimension/2, lambda_dimension/2);
 
-    for(unsigned int i=1; i<Chebyshev_points.size()-1; i++){
+    for(unsigned int i=0; i<number_of_Chebyshev_points-1; i++){
 
         //  Extract the curvature from the strain
-        K = Phi<na, ne>(Chebyshev_points[i])*t_qe;
+        K = Phi<na, ne>(Chebyshev_points[i+1])*t_qe;
 
         //  Build Skew Symmetric K matrix (K_hat)
         Eigen::Matrix3d K_hat = skew(K);
@@ -379,25 +378,13 @@ Eigen::MatrixXd updateCMatrix(const Eigen::VectorXd &t_qe, const Eigen::MatrixXd
 
         for (unsigned int row = 0; row < lambda_dimension/2; ++row) {
             for (unsigned int col = 0; col < lambda_dimension/2; ++col) {
-                int row_index = row*(number_of_Chebyshev_points-1);
-                int col_index = col*(number_of_Chebyshev_points-1);
+                int row_index = row*(number_of_Chebyshev_points-1)+i;
+                int col_index = col*(number_of_Chebyshev_points-1)+i;
                 C_NN(row_index, col_index) = D_NN(row_index, col_index) - A_at_chebyshev_point(row, col);
             }
         }
-
-        // for (unsigned int row = 0; row < lambda_dimension/2; ++row) {
-        //     for (unsigned int col = 0; col < lambda_dimension/2; ++col) {
-        //         int row_index = row*(number_of_Chebyshev_points-1);
-        //         int col_index = col*(number_of_Chebyshev_points-1);
-        //         A_NN(row_index, col_index) = A_at_chebyshev_point(row, col);
-        //     }
-        // }
     }
-
-    // C_NN = D_NN - A_NN;
-
     return C_NN;
-
 }
 
 Eigen::VectorXd computeNbar (Eigen::MatrixXd t_Q_stack_CUDA) 
@@ -416,20 +403,23 @@ Eigen::VectorXd computeNbar (Eigen::MatrixXd t_Q_stack_CUDA)
     Eigen::VectorXd Nbar_stack = Eigen::VectorXd::Zero((lambda_dimension/2)*(number_of_Chebyshev_points-1));
 
     // to fix
-    for (unsigned int i = 0; i < number_of_Chebyshev_points-1; ++i) {
+    for (unsigned int i = 1; i < number_of_Chebyshev_points; ++i) {
 
         Eigen::Quaterniond Qbar(t_Q_stack_CUDA(i),
               t_Q_stack_CUDA(i  +  (number_of_Chebyshev_points-1)),
               t_Q_stack_CUDA(i + 2*(number_of_Chebyshev_points-1)),
               t_Q_stack_CUDA(i + 3*(number_of_Chebyshev_points-1)));
 
+        if(i==15)
+        Eigen::Quaterniond Qbar(1,0,0,0);
+
         
         R = Qbar.toRotationMatrix();
         Nbar = R.transpose()*Fg;
 
-        Nbar_stack(i) = Nbar.x();
-        Nbar_stack(i  +  (number_of_Chebyshev_points-1)) = Nbar.y();
-        Nbar_stack(i + 2*(number_of_Chebyshev_points-1)) = Nbar.z();
+        Nbar_stack(i-1) = Nbar.x();
+        Nbar_stack(i  +  (number_of_Chebyshev_points-1)-1) = Nbar.y();
+        Nbar_stack(i + 2*(number_of_Chebyshev_points-1)-1) = Nbar.z();
 
     }
 
@@ -445,8 +435,9 @@ Eigen::MatrixXd integrateInternalForces(Eigen::MatrixXd t_Q_stack_CUDA)
 
     Eigen::MatrixXd C_NN =  updateCMatrix(qe, D_NN);
 
+
     Eigen::VectorXd N_init(lambda_dimension/2);
-    N_init << 1, 0, 0;
+    N_init << 0, 0, 0;
 
     Eigen::MatrixXd beta = -computeNbar(t_Q_stack_CUDA);
 
@@ -966,7 +957,7 @@ int main(int argc, char *argv[])
     // std::cout << "Position Integration : \n" << r_stack_CUDA << std::endl;
 
     const auto N_stack_CUDA = integrateInternalForces(Q_stack_CUDA);
-    // std::cout << "Internal Forces Integration : \n" << N_stack_CUDA << "\n" << std::endl;
+    std::cout << "Internal Forces Integration : \n" << N_stack_CUDA << "\n" << std::endl;
 
     const auto C_stack_CUDA = integrateInternalCouples(N_stack_CUDA);
     // std::cout << "Internal Couples Integration : \n" << C_stack_CUDA << "\n" << std::endl;

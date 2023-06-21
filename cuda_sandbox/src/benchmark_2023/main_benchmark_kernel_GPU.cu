@@ -470,11 +470,9 @@ __global__ void updatePositionbKernel(double* d_Q_stack_CUDA, double* d_b, doubl
 
         quaternionToRotationMatrix(q, R);
 
-        // b.block<1, 3>(i, 0) = (Eigen::Map<Eigen::MatrixXd>(R, 3, 3) * Eigen::Vector3d(1, 0, 0)).transpose();
-        d_b[0+i*position_dimension] = R[0] - d_ivp[0+i*position_dimension];
-        d_b[1+i*position_dimension] = R[3] - d_ivp[1+i*position_dimension];
-        d_b[2+i*position_dimension] = R[6] - d_ivp[2+i*position_dimension];
-
+        d_b[i] = R[0] - d_ivp[i];
+        d_b[i+(number_of_Chebyshev_points-1)] = R[3] - d_ivp[i+number_of_Chebyshev_points];
+        d_b[i+2*(number_of_Chebyshev_points-1)] = R[6] - d_ivp[i+2*number_of_Chebyshev_points];
     }
 }
 
