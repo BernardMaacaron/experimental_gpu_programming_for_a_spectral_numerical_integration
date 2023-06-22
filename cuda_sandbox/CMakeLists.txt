@@ -272,10 +272,11 @@ target_link_libraries(${PROJECT_NAME}_main_benchmark_GPU
         )
 # Add custom command to export benchmark results as CSV
 add_custom_command(TARGET ${PROJECT_NAME}_main_benchmark_GPU POST_BUILD
-    COMMAND ${PROJECT_NAME}_main_benchmark_GPU --benchmark_out_format=csv --benchmark_out="main_benchmark_GPU_na_2_ne_3.csv"
+    COMMAND ${PROJECT_NAME}_main_benchmark_GPU --benchmark_out_format=csv --benchmark_out="main_benchmark_GPU_cheb_31.csv"
     # ${PROJECT_NAME}_matMul_benchmark --benchmark_format=csv
     COMMENT "Exporting benchmark results to result.csv"
 )
+
 
 #MAIN BENCHMARK GPU Kernel Executable
 add_executable(${PROJECT_NAME}_main_benchmark_kernel_GPU
@@ -300,15 +301,13 @@ target_link_libraries(${PROJECT_NAME}_main_benchmark_kernel_GPU
         )
 # Add custom command to export benchmark results as CSV
 add_custom_command(TARGET ${PROJECT_NAME}_main_benchmark_kernel_GPU POST_BUILD
-    COMMAND ${PROJECT_NAME}_main_benchmark_kernel_GPU --benchmark_out_format=csv --benchmark_out="main_benchmark_kernel_GPU_na_2_ne_3.csv"
+    COMMAND ${PROJECT_NAME}_main_benchmark_kernel_GPU --benchmark_out_format=csv --benchmark_out="main_benchmark_kernel_GPU.csv"
     # ${PROJECT_NAME}_matMul_benchmark --benchmark_format=csv
     COMMENT "Exporting benchmark results to result.csv"
 )
 
 
-
-
-#Benchmark QUaternion GPU Executable
+#Benchmark Quaternion GPU Executable
 add_executable(${PROJECT_NAME}_benchmark_quaternion
         src/benchmark_2023/benchmark_quaternion.cu
         include/chebyshev_differentiation.h

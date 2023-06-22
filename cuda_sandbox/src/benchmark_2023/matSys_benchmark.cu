@@ -17,6 +17,9 @@
 #include <Eigen/LU>
 
 
+cusolverDnHandle_t cusolverH = NULL;
+
+
 
 void benchmarkMatMul_CPU(::benchmark::State &t_state)
 {
@@ -44,10 +47,8 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
     t_state.counters = {
       {"dim: ", dim},
     };
-
-    cusolverDnHandle_t cusolverH = NULL;
-
     CUSOLVER_CHECK(cusolverDnCreate(&cusolverH));
+
 
     Eigen::MatrixXd A = Eigen::MatrixXd::Random(dim, dim);
     Eigen::MatrixXd b = Eigen::MatrixXd::Random(dim, 1);
@@ -61,7 +62,7 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
 
     const int rows_b = b.rows();
     const int cols_b = b.cols();
-    const int ld_b = cols_b;
+    const int ld_b = rows_b;
 
     // LU factorization variables
     int info = 0;
@@ -77,22 +78,24 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
     const auto size_of_A_in_bytes = size_of_double * A.size();
     const auto size_of_b_in_bytes = size_of_double * b.size();
 
-    // Compute memory for LU factorization workspace
-    CUSOLVER_CHECK(cusolverDnDgetrf_bufferSize(cusolverH, rows_A, cols_A, d_A, ld_A, &lwork));
-
     // Allocate the memory
     CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_A), size_of_A_in_bytes));
     CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_b), size_of_b_in_bytes));
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&d_work), size_of_double * lwork));
+    CUDA_CHECK(cudaMemcpy(d_info, &info, sizeof(int), cudaMemcpyHostToDevice));
+
 
     //  Copy the data: cudaMemcpy(destination, file_to_copy, size_of_the_file, std_cmd)
     CUDA_CHECK(cudaMemcpy(d_A, A.data(), size_of_A_in_bytes, cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_b, b.data(), size_of_b_in_bytes, cudaMemcpyHostToDevice));
     
 
-    CUSOLVER_CHECK(
-        cusolverDnDgetrf_bufferSize(cusolverH, rows_A, cols_A, d_A, ld_A, &lwork)
-    );
+    cusolverStatus_t status = cusolverDnDgetrf_bufferSize(cusolverH, rows_A, cols_A, d_A, ld_A, &lwork);
+    if (status != CUSOLVER_STATUS_SUCCESS)
+    {
+        std::cerr << "cusolver error: " << getCusolverErrorString(status) << std::endl;
+        // Handle or debug the error appropriately
+    };
+    
     CUDA_CHECK(
         cudaMalloc(reinterpret_cast<void **>(&d_work), size_of_double * lwork)
     );
@@ -102,9 +105,22 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
     for (auto _ : t_state) {
         auto start = std::chrono::high_resolution_clock::now();
 
-        CUSOLVER_CHECK(cusolverDnDgetrf(cusolverH, rows_A, cols_A, d_A, ld_A, d_work, NULL, d_info));
+        
+    status = cusolverDnDgetrf(cusolverH, rows_A, cols_A, d_A, ld_A, d_work, NULL, d_info);
 
-        CUSOLVER_CHECK(cusolverDnDgetrs(cusolverH, CUBLAS_OP_N, rows_A, 1, d_A, ld_A, NULL, d_b, ld_b, d_info));
+    if (status != CUSOLVER_STATUS_SUCCESS)
+    {
+        std::cerr << "cusolver error: " << getCusolverErrorString(status) << std::endl;
+        // Handle or debug the error appropriately
+    };
+
+    status = cusolverDnDgetrs(cusolverH, CUBLAS_OP_N, rows_A, 1, d_A, ld_A, NULL, d_b, ld_b, d_info);
+    
+    if (status != CUSOLVER_STATUS_SUCCESS)
+    {
+        std::cerr << "cusolver error: " << getCusolverErrorString(status) << std::endl;
+        // Handle or debug the error appropriately
+    };
 
         auto end = std::chrono::high_resolution_clock::now();
 
@@ -115,6 +131,10 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
 
     //exportBenchmarkResultsToCSV(benchmark2_name + ".csv", t_state.name(), t_state.iterations(), t_state.real_time(), t_state.cpu_time());
    
+    CUDA_CHECK(cudaFree(d_A));
+    CUDA_CHECK(cudaFree(d_info));
+    CUDA_CHECK(cudaFree(d_work));
+    CUDA_CHECK(cudaFree(d_b));
     CUDA_CHECK(cudaFree(d_A));
     CUDA_CHECK(cudaFree(d_b));
 
@@ -127,7 +147,7 @@ void benchmarkMatMul_GPU(::benchmark::State &t_state)
 int main(int argc, char *argv[])
 {
 
-    const unsigned int repetitions = 20;
+    const unsigned int repetitions = 1;
 
     std::vector<unsigned int> matrix_dim = {20, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500};
 
@@ -135,13 +155,13 @@ int main(int argc, char *argv[])
     const std::string benchmark2_name = "System Solver GPU";
 
 
-    for(const auto dim : matrix_dim)
-        ::benchmark::RegisterBenchmark(benchmark1_name.c_str(), benchmarkMatMul_CPU)->Arg(dim)->Repetitions(repetitions)->Unit(::benchmark::kMicrosecond);
+    // for(const auto dim : matrix_dim)
+    //     ::benchmark::RegisterBenchmark(benchmark1_name.c_str(), benchmarkMatMul_CPU)->Arg(dim)->Repetitions(repetitions)->Unit(::benchmark::kMicrosecond);
         
-    ::benchmark::RegisterBenchmark(benchmark1_name.c_str(), [](::benchmark::State &t_state){
-        for(auto _ : t_state)
-            int a = 0;
-    });
+    // ::benchmark::RegisterBenchmark(benchmark1_name.c_str(), [](::benchmark::State &t_state){
+    //     for(auto _ : t_state)
+    //         int a = 0;
+    // });
 
     for(const auto dim : matrix_dim)
         ::benchmark::RegisterBenchmark(benchmark2_name.c_str(), benchmarkMatMul_GPU)->Arg(dim)->Repetitions(repetitions)->Unit(::benchmark::kMicrosecond);
